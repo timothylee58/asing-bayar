@@ -1,0 +1,54 @@
+{
+  "expo": {
+    "name": "Bayar.lah",
+    "slug": "bayarlah",
+    "version": "1.0.0",
+    "scheme": "bayarlah",
+    "orientation": "portrait",
+    "icon": "./assets/icon.png",
+    "userInterfaceStyle": "automatic",
+    "ios": {
+      "supportsTablet": true,
+      "bundleIdentifier": "com.timothylee.bayarlah"
+    },
+    "android": {
+      "adaptiveIcon": {
+        "backgroundColor": "#0F0D0B",
+        "foregroundImage": "./assets/android-icon-foreground.png",
+        "backgroundImage": "./assets/android-icon-background.png",
+        "monochromeImage": "./assets/android-icon-monochrome.png"
+      },
+      "package": "com.timothylee.bayarlah",
+      "predictiveBackGestureEnabled": false,
+      "googleServicesFile": "./google-services.json"
+    },
+    "web": {
+      "favicon": "./assets/favicon.png",
+      "bundler": "metro"
+    },
+    "plugins": [
+      "expo-router",
+      [
+        "expo-notifications",
+        {
+          "icon": "./assets/icon.png",
+          "color": "#C8410A",
+          "defaultChannel": "bayarlah",
+          "sounds": []
+        }
+      ]
+    ],
+    "experiments": {
+      "typedRoutes": true
+    },
+    "extra": {
+      "eas": {
+        "projectId": "REPLACE_WITH_EAS_PROJECT_ID"
+      },
+      "supabaseUrl": "",
+      "supabaseAnonKey": "",
+      "apiUrl": "http://localhost:8000",
+      "webUrl": "http://localhost:3000"
+    }
+  }
+}

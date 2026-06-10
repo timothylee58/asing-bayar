@@ -1,0 +1,28 @@
+name: AWS Amplify Deploy
+
+# Amplify has built-in git integration — this workflow is an OPTIONAL
+# manual trigger for force-deploying a specific branch.
+# Normal deploys: push to main → Amplify auto-builds (no workflow needed).
+
+on:
+  workflow_dispatch:
+    inputs:
+      branch:
+        description: 'Branch to deploy'
+        required: true
+        default: 'main'
+
+jobs:
+  trigger-amplify:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Trigger Amplify build
+        run: |
+          aws amplify start-job \
+            --app-id ${{ secrets.AWS_AMPLIFY_APP_ID }} \
+            --branch-name ${{ github.event.inputs.branch }} \
+            --job-type RELEASE
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          AWS_DEFAULT_REGION: ${{ secrets.AWS_REGION }}
