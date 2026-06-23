@@ -8,6 +8,8 @@ def make_seed(n: int = 8) -> str:
 
 
 def generate_tangga_rungs(n_lanes: int, seed: str) -> list[dict]:
+    if n_lanes < 2:
+        return []
     rng = random.Random(seed)
     n_rungs = n_lanes * 3
     rungs: list[dict] = []

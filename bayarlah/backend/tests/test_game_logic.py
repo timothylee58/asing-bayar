@@ -76,6 +76,12 @@ def test_rungs_target_count():
     assert len(rungs) > 0
 
 
+def test_rungs_less_than_two_lanes():
+    # Fewer than 2 lanes cannot have cross rungs — must return [] not ValueError.
+    assert generate_tangga_rungs(1, SEED) == []
+    assert generate_tangga_rungs(0, SEED) == []
+
+
 def test_rungs_two_lanes():
     rungs = generate_tangga_rungs(2, SEED)
     # Only one possible lane index (0) for a 2-lane ladder.
