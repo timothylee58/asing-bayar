@@ -114,7 +114,7 @@ async def nudge_participant(
         asyncio.create_task(send_expo_push(
             tokens=push_tokens,
             title="Eh, bayar lah! 💸",
-            body=f"Your organiser is waiting for your payment.",
+            body="Your organiser is waiting for your payment.",
             data={"billId": bill_id, "type": "nudge"},
         ))
 

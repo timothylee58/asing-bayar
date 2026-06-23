@@ -3,7 +3,7 @@ from supabase import Client
 from uuid import UUID
 
 from app.core.dependencies import get_supabase, get_current_user
-from app.models.bill import BillCreate, BillResponse, ParticipantResponse
+from app.models.bill import BillCreate, BillResponse
 
 router = APIRouter()
 

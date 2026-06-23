@@ -101,8 +101,8 @@ export default function PayClientPage({ bill }: Props) {
         throw new Error(body.detail ?? 'Failed to confirm payment');
       }
       setStep('done');
-    } catch (e: any) {
-      setError(e.message ?? 'Something went wrong');
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Something went wrong');
     } finally {
       setSubmitting(false);
     }

@@ -3,7 +3,6 @@ from supabase import Client
 import redis.asyncio as aioredis
 import json
 import random
-import string
 
 from app.core.dependencies import get_supabase, get_redis
 from app.models.game import (
@@ -11,44 +10,15 @@ from app.models.game import (
     TanggaLockRequest,
     RouletteSpinRequest,
     RouletteLockRequest,
-    GameResultResponse,
 )
+from app.utils.game_logic import make_seed, generate_tangga_rungs, traverse_tangga
 
 router = APIRouter()
 
-
-def _make_seed(n: int = 8) -> str:
-    return "".join(random.choices(string.ascii_lowercase + string.digits, k=n))
-
-
-def _generate_tangga_rungs(n_lanes: int, seed: str) -> list[dict]:
-    rng = random.Random(seed)
-    n_rungs = n_lanes * 3
-    rungs = []
-    used: set[tuple] = set()
-
-    for _ in range(n_rungs * 5):
-        if len(rungs) >= n_rungs:
-            break
-        lane = rng.randint(0, n_lanes - 2)
-        y = rng.uniform(0.05, 0.95)
-        y_rounded = round(y, 2)
-        key = (lane, round(y_rounded, 1))
-        if key not in used:
-            used.add(key)
-            rungs.append({"lane": lane, "y": y_rounded})
-
-    return sorted(rungs, key=lambda r: r["y"])
-
-
-def _traverse_tangga(start_lane: int, rungs: list[dict]) -> int:
-    lane = start_lane
-    for rung in rungs:
-        if rung["lane"] == lane:
-            lane += 1
-        elif rung["lane"] == lane - 1:
-            lane -= 1
-    return lane
+# Keep private aliases so existing call-sites inside this module are unchanged.
+_make_seed = make_seed
+_generate_tangga_rungs = generate_tangga_rungs
+_traverse_tangga = traverse_tangga
 
 
 @router.post("/tangga/generate")
@@ -64,8 +34,8 @@ async def generate_tangga(
             raise HTTPException(status_code=409, detail="Game already locked")
 
     n = len(payload.participant_ids)
-    seed = _make_seed()
-    rungs = _generate_tangga_rungs(n, seed)
+    seed = make_seed()
+    rungs = generate_tangga_rungs(n, seed)
 
     state = {
         "mode": "tangga",
@@ -122,7 +92,7 @@ async def spin_roulette(
         if state.get("locked"):
             raise HTTPException(status_code=409, detail="Game already locked")
 
-    seed = _make_seed()
+    seed = make_seed()
     rng = random.Random(seed)
     angular_velocity = rng.uniform(800, 1200)
 
