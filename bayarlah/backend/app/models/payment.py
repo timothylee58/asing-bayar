@@ -1,5 +1,4 @@
 from pydantic import BaseModel, UUID4
-from typing import Optional
 from decimal import Decimal
 from datetime import datetime
 
