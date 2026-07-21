@@ -26,7 +26,7 @@ export async function generateMetadata({ params }: Props): Promise<Metadata> {
   const bill = await fetchBill(billId);
   if (!bill) return { title: 'Bill not found — Bayar.lah' };
 
-  const collected = (bill.payments ?? []).reduce((s: number, p: any) => s + Number(p.amount), 0);
+  const collected = (bill.payments ?? []).reduce((s: number, p) => s + Number(p.amount), 0);
   const pct = Math.round((collected / bill.total_amount) * 100);
 
   return {

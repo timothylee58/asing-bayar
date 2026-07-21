@@ -5,9 +5,7 @@ from decimal import Decimal
 from collections import defaultdict
 
 from app.core.dependencies import get_supabase, get_current_user
-from app.core.config import settings
-from app.models.bill import BillCreate, BillResponse, ParticipantResponse
-from app.models.balance import ContactBalance, BalancesResponse
+from app.models.bill import BillCreate, BillResponse
 
 router = APIRouter()
 
