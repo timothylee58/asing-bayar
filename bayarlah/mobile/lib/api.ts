@@ -124,3 +124,34 @@ export async function lockRoulette(payload: {
     body: JSON.stringify(payload),
   });
 }
+
+
+// ── Payment QR Upload ─────────────────────────────────────────────────────────
+
+export async function uploadPaymentQR(
+  billId: string,
+  imageUri: string,
+): Promise<{ duitnow_qr_url: string }> {
+  const headers = await authHeaders();
+  // Remove Content-Type so fetch sets multipart/form-data with boundary
+  delete headers['Content-Type'];
+
+  const formData = new FormData();
+  const filename = imageUri.split('/').pop() ?? 'qr.png';
+  const ext = filename.split('.').pop()?.toLowerCase() ?? 'png';
+  const mimeType = ext === 'jpg' || ext === 'jpeg' ? 'image/jpeg' : 'image/png';
+
+  formData.append('file', {
+    uri: imageUri,
+    name: filename,
+    type: mimeType,
+  } as any);
+
+  const res = await fetch(`${API_URL}/api/bills/${billId}/payment-qr`, {
+    method: 'POST',
+    headers,
+    body: formData,
+  });
+  if (!res.ok) throw new Error(await res.text());
+  return res.json();
+}

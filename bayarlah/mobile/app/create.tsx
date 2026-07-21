@@ -10,9 +10,12 @@ import {
   useColorScheme,
   KeyboardAvoidingView,
   Platform,
+  Image,
+  ActivityIndicator,
 } from 'react-native';
 import { useRouter, useLocalSearchParams } from 'expo-router';
-import { createBill } from '../lib/api';
+import * as ImagePicker from 'expo-image-picker';
+import { createBill, uploadPaymentQR } from '../lib/api';
 import { Colors, Spacing, Radius, EMOJI_TAGS } from '../constants/theme';
 import type { PaymentDetails } from '../types';
 
@@ -55,6 +58,8 @@ export default function CreateBillScreen() {
   const [showPaymentDetails, setShowPaymentDetails] = useState(false);
   const [duitnowId, setDuitnowId] = useState('');
   const [duitnowIdType, setDuitnowIdType] = useState<'phone' | 'nric' | 'business'>('phone');
+  const [duitnowQrUri, setDuitnowQrUri] = useState<string | null>(null);
+  const [qrUploading, setQrUploading] = useState(false);
   const [tngPhone, setTngPhone] = useState('');
   const [bankName, setBankName] = useState('');
   const [bankAccount, setBankAccount] = useState('');
@@ -99,6 +104,23 @@ export default function CreateBillScreen() {
     return Object.keys(details).length > 0 ? details : undefined;
   };
 
+  const pickQrImage = async () => {
+    const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
+    if (status !== 'granted') {
+      Alert.alert('Permission needed', 'Allow photo access to upload your DuitNow QR.');
+      return;
+    }
+    const result = await ImagePicker.launchImageLibraryAsync({
+      mediaTypes: ['images'],
+      allowsEditing: true,
+      aspect: [1, 1],
+      quality: 0.8,
+    });
+    if (!result.canceled && result.assets[0]) {
+      setDuitnowQrUri(result.assets[0].uri);
+    }
+  };
+
   const handleSubmit = async () => {
     if (!title.trim()) return Alert.alert('Missing', 'Enter a bill title.');
     if (!amount || isNaN(parseFloat(amount))) return Alert.alert('Missing', 'Enter a valid amount.');
@@ -116,6 +138,17 @@ export default function CreateBillScreen() {
         participants: validParticipants.map((p) => ({ name: p.name.trim(), phone: p.phone.trim() || undefined })),
         payment_details: buildPaymentDetails(),
       });
+
+      // Upload QR image if selected (fire after bill creation)
+      if (duitnowQrUri && bill.id) {
+        try {
+          await uploadPaymentQR(bill.id, duitnowQrUri);
+        } catch {
+          // Non-critical — bill is already created, QR can be uploaded later
+          Alert.alert('Note', 'Bill created but QR upload failed. You can re-upload later.');
+        }
+      }
+
       router.replace(`/bill/${bill.id}`);
     } catch (e: any) {
       Alert.alert('Error', e.message ?? 'Failed to create bill.');
@@ -277,6 +310,29 @@ export default function CreateBillScreen() {
               keyboardType={duitnowIdType === 'phone' ? 'phone-pad' : 'default'}
             />
 
+            {/* DuitNow QR Image Upload */}
+            <Text style={[styles.qrLabel, { color: subText }]}>or upload your DuitNow QR</Text>
+            <TouchableOpacity
+              style={[styles.qrPickerBtn, { borderColor, backgroundColor: inputBg }]}
+              onPress={pickQrImage}
+            >
+              {duitnowQrUri ? (
+                <Image source={{ uri: duitnowQrUri }} style={styles.qrPreview} />
+              ) : (
+                <View style={styles.qrPlaceholder}>
+                  <Text style={{ fontSize: 28 }}>📷</Text>
+                  <Text style={[styles.qrPlaceholderText, { color: subText }]}>
+                    Tap to select QR image
+                  </Text>
+                </View>
+              )}
+            </TouchableOpacity>
+            {duitnowQrUri && (
+              <TouchableOpacity onPress={() => setDuitnowQrUri(null)}>
+                <Text style={[styles.qrRemoveText, { color: Colors.error }]}>Remove QR image</Text>
+              </TouchableOpacity>
+            )}
+
             {/* Touch 'n Go */}
             <Text style={[styles.subLabel, { color: Colors.turmericGold, marginTop: Spacing.md }]}>💳 Touch &apos;n Go</Text>
             <TextInput
@@ -370,6 +426,13 @@ const styles = StyleSheet.create({
   bankChip: { paddingHorizontal: Spacing.sm + 2, paddingVertical: Spacing.xs + 2, borderRadius: Radius.chip, borderWidth: 1, marginRight: Spacing.xs },
   crossLinkBadge: { borderRadius: Radius.card, padding: Spacing.sm + 2, marginBottom: Spacing.sm, alignItems: 'center' },
   crossLinkText: { fontSize: 13, fontWeight: '600' },
+  // QR picker
+  qrLabel: { fontSize: 11, textAlign: 'center', marginTop: Spacing.sm, marginBottom: Spacing.xs },
+  qrPickerBtn: { borderWidth: 1.5, borderStyle: 'dashed', borderRadius: Radius.card, padding: Spacing.sm, alignItems: 'center', justifyContent: 'center', minHeight: 120 },
+  qrPreview: { width: 120, height: 120, borderRadius: Radius.card },
+  qrPlaceholder: { alignItems: 'center', gap: Spacing.xs },
+  qrPlaceholderText: { fontSize: 12, fontWeight: '500' },
+  qrRemoveText: { fontSize: 12, fontWeight: '600', textAlign: 'center', marginTop: Spacing.xs },
   // Submit
   submitBtn: { backgroundColor: Colors.brandRed, borderRadius: Radius.button, padding: Spacing.md + 4, alignItems: 'center', marginTop: Spacing.md },
   submitDisabled: { opacity: 0.6 },
