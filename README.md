@@ -2,7 +2,7 @@
 
 > **Split duit, no awkward lah.**
 
-A production-grade, mobile-first bill splitting app built for Malaysian group culture — hawker runs, trips, housemate expenses, class events. Features gamified payment assignment via animated ladder draws and roulette wheels, real-time WebSocket dashboards, and Expo push notifications.
+A production-grade, mobile-first bill splitting app built for Malaysian lepak/yumcha/makan angin group culture — hawker runs, trips, housemate expenses, class events. Features gamified payment assignment via animated ladder draws and roulette wheels, real-time WebSocket dashboards, and Expo push notifications.
 
 [![CI](https://github.com/timothylee58/bayarlah/actions/workflows/ci.yml/badge.svg)](https://github.com/timothylee58/bayarlah/actions/workflows/ci.yml)
 [![Railway Deploy](https://github.com/timothylee58/bayarlah/actions/workflows/railway-deploy.yml/badge.svg)](https://github.com/timothylee58/bayarlah/actions/workflows/railway-deploy.yml)
