@@ -3,9 +3,12 @@ from supabase import Client
 import redis.asyncio as aioredis
 import json
 import random
+from decimal import Decimal, ROUND_HALF_UP
 
 from app.core.dependencies import get_supabase, get_redis
 from app.models.game import (
+    DaduLockRequest,
+    DaduRollRequest,
     TanggaGenerateRequest,
     TanggaLockRequest,
     RouletteSpinRequest,

@@ -1,12 +1,19 @@
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request
 from supabase import Client
 import redis.asyncio as aioredis
 import urllib.parse
 import asyncio
 
+from app.core.config import settings
 from app.core.dependencies import get_supabase, get_redis
 from app.core.ws_manager import manager
-from app.models.payment import PaymentConfirm, PaymentResponse
+from app.models.payment import (
+    PaymentConfirm,
+    PaymentInitiateRequest,
+    PaymentInitiateResponse,
+    PaymentResponse,
+)
+from app.services.payment_gateway import get_gateway
 from app.services.push_service import send_expo_push, get_participant_tokens
 
 router = APIRouter()
@@ -119,3 +126,148 @@ async def nudge_participant(
         ))
 
     return {"nudged": True, "whatsapp_link": wa_link, "name": name}
+
+
+
+# ── Level 2: Gateway-verified payments ─────────────────────────────────────────
+
+
+@router.post("/initiate", response_model=PaymentInitiateResponse)
+async def initiate_payment(
+    payload: PaymentInitiateRequest,
+    supabase: Client = Depends(get_supabase),
+):
+    """Initiate a gateway-verified payment (Level 2).
+
+    Creates a payment request with the configured gateway and returns
+    a redirect URL (for TnG/FPX) or QR code URL (for DuitNow).
+    Falls back to stub gateway when PAYMENT_GATEWAY_ENABLED=False.
+    """
+    if payload.method == "cash":
+        raise HTTPException(
+            status_code=400,
+            detail="Cash payments use honor-system confirmation, not gateway.",
+        )
+
+    # Check for existing payment
+    existing = (
+        supabase.table("payments")
+        .select("id")
+        .eq("participant_id", str(payload.participant_id))
+        .eq("bill_id", str(payload.bill_id))
+        .execute()
+    )
+    if existing.data:
+        raise HTTPException(status_code=409, detail="Payment already confirmed")
+
+    gateway = get_gateway()
+    reference = f"{payload.bill_id}:{payload.participant_id}"
+    redirect_url = f"{settings.WEB_BASE_URL}/pay/{payload.bill_id}?status=success"
+    webhook_url = f"{settings.WEB_BASE_URL}/api/payments/webhook/gateway"
+
+    # For production, webhook_url should point to the backend not web
+    if settings.ENV == "production":
+        webhook_url = f"{settings.CORS_ORIGINS[0].rstrip('/')}/api/payments/webhook/gateway"
+
+    result = await gateway.create_payment(
+        amount=payload.amount,
+        currency="MYR",
+        method=payload.method,
+        reference=reference,
+        redirect_url=redirect_url,
+        webhook_url=webhook_url,
+        description=f"Bayar.lah payment for bill {payload.bill_id}",
+    )
+
+    # Insert a pending payment record
+    supabase.table("payments").insert({
+        "participant_id": str(payload.participant_id),
+        "bill_id": str(payload.bill_id),
+        "amount": float(payload.amount),
+        "method": payload.method,
+        "gateway_ref": result.gateway_ref,
+        "gateway_status": "pending",
+    }).execute()
+
+    return PaymentInitiateResponse(
+        gateway_ref=result.gateway_ref,
+        payment_url=result.payment_url,
+        qr_url=result.qr_url,
+        status=result.status,
+    )
+
+
+@router.post("/webhook/gateway")
+async def gateway_webhook(
+    request: Request,
+    supabase: Client = Depends(get_supabase),
+):
+    """Receive and process payment gateway webhook callbacks.
+
+    Verifies the webhook signature, updates the payment record status,
+    and triggers the same WebSocket broadcast + push notification flow
+    as the manual confirm endpoint.
+    """
+    body_bytes = await request.body()
+    body = await request.json()
+
+    gateway = get_gateway()
+
+    # Verify signature (skip for stub gateway in dev)
+    signature = request.headers.get("X-HitPay-Signature", "")
+    if settings.PAYMENT_GATEWAY_ENABLED and not gateway.verify_webhook(
+        payload=body_bytes, signature=signature
+    ):
+        raise HTTPException(status_code=401, detail="Invalid webhook signature")
+
+    parsed = gateway.parse_webhook(body)
+    reference = parsed.get("reference", "")
+    status = parsed.get("status", "unknown")
+    gateway_ref = parsed.get("gateway_ref", "")
+
+    if not reference or ":" not in reference:
+        # Not a Bayar.lah reference — ignore
+        return {"status": "ignored"}
+
+    bill_id, participant_id = reference.split(":", 1)
+
+    if status == "verified":
+        # Update payment record to verified
+        supabase.table("payments").update({
+            "gateway_status": "verified",
+        }).eq("gateway_ref", gateway_ref).execute()
+
+        # Fetch participant name for broadcast
+        p = supabase.table("participants").select("name").eq("id", participant_id).single().execute()
+        name = p.data["name"] if p.data else "Someone"
+
+        # Fetch bill info
+        bill = supabase.table("bills").select("title, organiser_id").eq("id", bill_id).single().execute()
+        bill_title = bill.data["title"] if bill.data else "Bill"
+        organiser_id = bill.data.get("organiser_id") if bill.data else None
+
+        # Fetch the updated payment record for broadcast
+        payment_result = supabase.table("payments").select("*").eq("gateway_ref", gateway_ref).single().execute()
+        payment = payment_result.data
+
+        # WebSocket broadcast
+        if payment:
+            await manager.broadcast(bill_id, {
+                "type": "payment_confirmed",
+                "payment": payment,
+                "participant_name": name,
+            })
+
+        # Push notification
+        if organiser_id:
+            asyncio.create_task(_notify_organiser(
+                supabase, organiser_id, name, bill_title, bill_id
+            ))
+
+    elif status in ("failed", "expired"):
+        # Mark payment as failed — participant can retry
+        supabase.table("payments").update({
+            "gateway_status": status,
+        }).eq("gateway_ref", gateway_ref).execute()
+
+    return {"status": "ok"}

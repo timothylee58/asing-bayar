@@ -4,7 +4,9 @@ from uuid import UUID
 from decimal import Decimal
 from collections import defaultdict
 
+from app.core.config import settings
 from app.core.dependencies import get_supabase, get_current_user
+from app.models.balance import BalancesResponse, ContactBalance
 from app.models.bill import BillCreate, BillResponse
 
 router = APIRouter()
@@ -46,6 +48,7 @@ async def create_bill(
         "due_date": payload.due_date.isoformat() if payload.due_date else None,
         "emoji_tag": payload.emoji_tag,
         "game_mode": payload.game_mode,
+        "payment_details": payload.payment_details.model_dump(exclude_none=True) if payload.payment_details else None,
     }
 
     result = supabase.table("bills").insert(bill_data).execute()
@@ -145,6 +148,52 @@ async def get_bill(bill_id: UUID, supabase: Client = Depends(get_supabase)):
         raise HTTPException(status_code=404, detail="Bill not found")
     bill = result.data
     return {**bill, "share_url": f"/pay/{bill['id']}"}
+
+
+@router.post("/{bill_id}/payment-qr")
+async def upload_payment_qr(
+    bill_id: UUID,
+    file: UploadFile = File(...),
+    user=Depends(get_current_user),
+    supabase: Client = Depends(get_supabase),
+):
+    """Upload organiser's DuitNow QR image for the share page (Level 1).
+
+    Members see this QR on the share page when they select DuitNow as their
+    payment method — they scan it with their banking app to pay the organiser.
+    """
+    result = supabase.table("bills").select("organiser_id, payment_details").eq("id", str(bill_id)).single().execute()
+    bill = result.data
+    if not bill:
+        raise HTTPException(status_code=404, detail="Bill not found")
+    if str(bill["organiser_id"]) != str(user.id):
+        raise HTTPException(status_code=403, detail="Only the organiser can upload payment QR")
+
+    if not file.content_type or not file.content_type.startswith("image/"):
+        raise HTTPException(status_code=422, detail="File must be an image")
+
+    data = await file.read()
+    if len(data) > 3 * 1024 * 1024:
+        raise HTTPException(status_code=422, detail="File must be under 3MB")
+
+    ext = file.filename.rsplit(".", 1)[-1] if file.filename and "." in file.filename else "png"
+    path = f"payment-qr/{bill_id}.{ext}"
+
+    bucket = supabase.storage.from_("payment-qr")
+    # Upsert: remove existing file if present, then upload
+    try:
+        bucket.remove([f"{bill_id}.png", f"{bill_id}.jpg", f"{bill_id}.jpeg"])
+    except Exception:
+        pass  # File may not exist yet
+    bucket.upload(path, data, {"content-type": file.content_type, "upsert": "true"})
+    qr_url = bucket.get_public_url(path)
+
+    # Update payment_details JSONB with the new QR URL
+    existing_details = bill.get("payment_details") or {}
+    existing_details["duitnow_qr_url"] = qr_url
+    supabase.table("bills").update({"payment_details": existing_details}).eq("id", str(bill_id)).execute()
+
+    return {"duitnow_qr_url": qr_url}
 
 
 @router.post("/{bill_id}/receipt")

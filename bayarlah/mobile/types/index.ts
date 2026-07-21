@@ -16,6 +16,19 @@ export interface Payment {
   method: 'duitnow' | 'tng' | 'bank' | 'cash';
   confirmed_at: string;
   status: string;
+  gateway_ref?: string;
+  gateway_status?: string;
+}
+
+/** Organiser-provided payment destination details (Level 1). */
+export interface PaymentDetails {
+  duitnow_id?: string;
+  duitnow_id_type?: 'phone' | 'nric' | 'business';
+  duitnow_qr_url?: string;
+  tng_phone?: string;
+  bank_name?: string;
+  bank_account?: string;
+  bank_holder?: string;
 }
 
 export interface Bill {
@@ -33,6 +46,7 @@ export interface Bill {
   share_url?: string;
   participants?: Participant[];
   payments?: Payment[];
+  payment_details?: PaymentDetails | null;
 }
 
 export interface GameResult {
