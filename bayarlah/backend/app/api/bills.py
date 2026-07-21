@@ -4,7 +4,9 @@ from uuid import UUID
 from decimal import Decimal
 from collections import defaultdict
 
+from app.core.config import settings
 from app.core.dependencies import get_supabase, get_current_user
+from app.models.balance import BalancesResponse, ContactBalance
 from app.models.bill import BillCreate, BillResponse
 
 router = APIRouter()
@@ -46,6 +48,7 @@ async def create_bill(
         "due_date": payload.due_date.isoformat() if payload.due_date else None,
         "emoji_tag": payload.emoji_tag,
         "game_mode": payload.game_mode,
+        "payment_details": payload.payment_details.model_dump(exclude_none=True) if payload.payment_details else None,
     }
 
     result = supabase.table("bills").insert(bill_data).execute()

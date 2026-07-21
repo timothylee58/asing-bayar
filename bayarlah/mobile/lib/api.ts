@@ -1,6 +1,6 @@
 import Constants from 'expo-constants';
 import { supabase } from './supabase';
-import type { Bill, Participant, Payment } from '../types';
+import type { Bill, Participant, Payment, PaymentDetails } from '../types';
 
 const API_URL = (Constants.expoConfig?.extra?.apiUrl as string) ?? 'http://localhost:8000';
 
@@ -26,6 +26,7 @@ export async function createBill(payload: {
   emoji_tag: string;
   game_mode: string;
   participants: { name: string; phone?: string }[];
+  payment_details?: PaymentDetails;
 }): Promise<Bill> {
   const headers = await authHeaders();
   return req('/api/bills', { method: 'POST', headers, body: JSON.stringify(payload) });

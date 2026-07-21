@@ -2,7 +2,7 @@
 
 import { useState, useEffect } from 'react';
 import { createClient } from '@supabase/supabase-js';
-import type { Bill, Participant, Payment } from '../../../types';
+import type { Bill, Participant, Payment, PaymentDetails } from '../../../types';
 
 function useRealtimePayments(billId: string, initial: Payment[]) {
   const [payments, setPayments] = useState<Payment[]>(initial);
@@ -61,6 +61,119 @@ function ProgressBar({ collected, total }: { collected: number; total: number })
   );
 }
 
+// ── Payment Details Display (Level 1) ─────────────────────────────────────────
+
+function PaymentInstructions({
+  method,
+  details,
+  amount,
+}: {
+  method: string;
+  details: PaymentDetails | null | undefined;
+  amount: number;
+}) {
+  if (!details) return null;
+
+  if (method === 'duitnow') {
+    const hasInfo = details.duitnow_id || details.duitnow_qr_url;
+    if (!hasInfo) return null;
+    return (
+      <div className="rounded-xl p-4 mb-4" style={{ backgroundColor: '#FEF9F0', border: '1px solid #F5E6D3' }}>
+        <p className="text-xs font-bold text-stone-500 uppercase tracking-widest mb-2">
+          Pay via DuitNow
+        </p>
+        {details.duitnow_qr_url && (
+          <div className="flex justify-center mb-3">
+            <img
+              src={details.duitnow_qr_url}
+              alt="DuitNow QR Code"
+              className="w-48 h-48 rounded-lg border border-stone-200"
+            />
+          </div>
+        )}
+        {details.duitnow_id && (
+          <div className="text-center">
+            <p className="text-sm text-stone-600">
+              {details.duitnow_id_type === 'phone' ? 'Phone' :
+               details.duitnow_id_type === 'nric' ? 'NRIC' : 'ID'}:{' '}
+              <span className="font-bold text-stone-900 font-mono">{details.duitnow_id}</span>
+            </p>
+          </div>
+        )}
+        <p className="text-center text-xs text-stone-500 mt-2">
+          Transfer <strong>RM {amount.toFixed(2)}</strong> then confirm below
+        </p>
+      </div>
+    );
+  }
+
+  if (method === 'tng') {
+    if (!details.tng_phone) return null;
+    return (
+      <div className="rounded-xl p-4 mb-4" style={{ backgroundColor: '#F0F7FE', border: '1px solid #D3E6F5' }}>
+        <p className="text-xs font-bold text-stone-500 uppercase tracking-widest mb-2">
+          Pay via Touch &apos;n Go
+        </p>
+        <div className="text-center">
+          <p className="text-sm text-stone-600">
+            Send to:{' '}
+            <span className="font-bold text-stone-900 font-mono">{details.tng_phone}</span>
+          </p>
+          <p className="text-xs text-stone-500 mt-2">
+            Transfer <strong>RM {amount.toFixed(2)}</strong> via TnG eWallet, then confirm below
+          </p>
+        </div>
+      </div>
+    );
+  }
+
+  if (method === 'bank') {
+    if (!details.bank_account) return null;
+    return (
+      <div className="rounded-xl p-4 mb-4" style={{ backgroundColor: '#F0FEF5', border: '1px solid #D3F5E0' }}>
+        <p className="text-xs font-bold text-stone-500 uppercase tracking-widest mb-2">
+          Bank Transfer Details
+        </p>
+        <div className="space-y-1">
+          {details.bank_name && (
+            <p className="text-sm text-stone-600">
+              Bank: <span className="font-bold text-stone-900">{details.bank_name}</span>
+            </p>
+          )}
+          <p className="text-sm text-stone-600">
+            Account: <span className="font-bold text-stone-900 font-mono">{details.bank_account}</span>
+          </p>
+          {details.bank_holder && (
+            <p className="text-sm text-stone-600">
+              Name: <span className="font-bold text-stone-900">{details.bank_holder}</span>
+            </p>
+          )}
+        </div>
+        <p className="text-xs text-stone-500 mt-2">
+          Transfer <strong>RM {amount.toFixed(2)}</strong> then confirm below
+        </p>
+      </div>
+    );
+  }
+
+  if (method === 'cash') {
+    return (
+      <div className="rounded-xl p-4 mb-4" style={{ backgroundColor: '#FEFEF0', border: '1px solid #F5F3D3' }}>
+        <p className="text-xs font-bold text-stone-500 uppercase tracking-widest mb-2">
+          Cash Payment
+        </p>
+        <p className="text-sm text-stone-600 text-center">
+          Hand <strong>RM {amount.toFixed(2)}</strong> to the organiser in person, then confirm below.
+        </p>
+      </div>
+    );
+  }
+
+  return null;
+}
+
+// ── Main Component ────────────────────────────────────────────────────────────
+
 interface Props {
   bill: Bill;
 }
@@ -79,6 +192,8 @@ export default function PayClientPage({ bill }: Props) {
   const [method, setMethod] = useState<string>('');
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string>('');
+
+  const paymentAmount = selected ? (selected.amount_owed ?? bill.per_person) : bill.per_person;
 
   const handleConfirm = async () => {
     if (!selected || !method) return;
@@ -184,7 +299,7 @@ export default function PayClientPage({ bill }: Props) {
           </div>
         )}
 
-        {/* Step: choose payment method */}
+        {/* Step: choose payment method + show payment details */}
         {step === 'method' && selected && (
           <div>
             <button
@@ -214,6 +329,15 @@ export default function PayClientPage({ bill }: Props) {
               ))}
             </div>
 
+            {/* Level 1: Show organiser payment details for the selected method */}
+            {method && (
+              <PaymentInstructions
+                method={method}
+                details={bill.payment_details}
+                amount={paymentAmount}
+              />
+            )}
+
             {error && (
               <p className="text-red-600 text-sm mb-3">{error}</p>
             )}
@@ -224,7 +348,7 @@ export default function PayClientPage({ bill }: Props) {
               className="w-full rounded-xl py-4 font-bold text-white text-lg transition-all disabled:opacity-50"
               style={{ backgroundColor: '#C8410A' }}
             >
-              {submitting ? 'Confirming...' : `Confirm RM ${(selected.amount_owed ?? bill.per_person).toFixed(2)} 💸`}
+              {submitting ? 'Confirming...' : `Confirm RM ${paymentAmount.toFixed(2)} 💸`}
             </button>
           </div>
         )}
@@ -236,7 +360,7 @@ export default function PayClientPage({ bill }: Props) {
             <h2 className="text-xl font-extrabold text-stone-900">Dah bayar!</h2>
             <p className="text-stone-500 mt-2">
               {selected.name}, your payment of{' '}
-              <strong>RM {(selected.amount_owed ?? bill.per_person).toFixed(2)}</strong> is confirmed.
+              <strong>RM {paymentAmount.toFixed(2)}</strong> is confirmed.
             </p>
             <p className="text-xs text-stone-400 mt-4">
               The organiser will be notified. Terima kasih! 🙏

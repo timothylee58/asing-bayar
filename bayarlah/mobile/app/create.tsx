@@ -11,27 +11,54 @@ import {
   KeyboardAvoidingView,
   Platform,
 } from 'react-native';
-import { useRouter } from 'expo-router';
+import { useRouter, useLocalSearchParams } from 'expo-router';
 import { createBill } from '../lib/api';
 import { Colors, Spacing, Radius, EMOJI_TAGS } from '../constants/theme';
+import type { PaymentDetails } from '../types';
 
 interface ParticipantField {
   name: string;
   phone: string;
 }
 
+const DUITNOW_ID_TYPES = [
+  { key: 'phone', label: 'Phone' },
+  { key: 'nric', label: 'NRIC' },
+  { key: 'business', label: 'Business' },
+] as const;
+
+const BANKS = [
+  'Maybank', 'CIMB', 'Public Bank', 'RHB', 'Hong Leong',
+  'AmBank', 'Bank Islam', 'Bank Rakyat', 'OCBC', 'UOB',
+  'Standard Chartered', 'HSBC', 'Other',
+] as const;
+
 export default function CreateBillScreen() {
   const router = useRouter();
+  const params = useLocalSearchParams<{ amount?: string; emoji?: string; ref?: string }>();
   const scheme = useColorScheme();
   const isDark = scheme === 'dark';
 
+  // Cross-link pre-fill from Bajet Buddy deep-link
+  const prefillAmount = params.amount && !isNaN(parseFloat(params.amount)) ? params.amount : '';
+  const prefillEmoji = params.emoji || '🍽️';
+
   const [title, setTitle] = useState('');
-  const [amount, setAmount] = useState('');
+  const [amount, setAmount] = useState(prefillAmount);
   const [description, setDescription] = useState('');
-  const [emoji, setEmoji] = useState('🍽️');
+  const [emoji, setEmoji] = useState(prefillEmoji);
   const [gameMode, setGameMode] = useState<'equal' | 'tangga' | 'roulette'>('equal');
   const [participants, setParticipants] = useState<ParticipantField[]>([{ name: '', phone: '' }]);
   const [loading, setLoading] = useState(false);
+
+  // Payment details (Level 1)
+  const [showPaymentDetails, setShowPaymentDetails] = useState(false);
+  const [duitnowId, setDuitnowId] = useState('');
+  const [duitnowIdType, setDuitnowIdType] = useState<'phone' | 'nric' | 'business'>('phone');
+  const [tngPhone, setTngPhone] = useState('');
+  const [bankName, setBankName] = useState('');
+  const [bankAccount, setBankAccount] = useState('');
+  const [bankHolder, setBankHolder] = useState('');
 
   const textColor = isDark ? Colors.lightBg : Colors.darkBg;
   const cardBg = isDark ? Colors.gray700 : Colors.white;
@@ -56,6 +83,22 @@ export default function CreateBillScreen() {
     return `RM ${(n / count).toFixed(2)}`;
   };
 
+  const buildPaymentDetails = (): PaymentDetails | undefined => {
+    const details: PaymentDetails = {};
+    if (duitnowId.trim()) {
+      details.duitnow_id = duitnowId.trim();
+      details.duitnow_id_type = duitnowIdType;
+    }
+    if (tngPhone.trim()) details.tng_phone = tngPhone.trim();
+    if (bankAccount.trim()) {
+      details.bank_account = bankAccount.trim();
+      if (bankName.trim()) details.bank_name = bankName.trim();
+      if (bankHolder.trim()) details.bank_holder = bankHolder.trim();
+    }
+    // Return undefined if empty (don't send null object)
+    return Object.keys(details).length > 0 ? details : undefined;
+  };
+
   const handleSubmit = async () => {
     if (!title.trim()) return Alert.alert('Missing', 'Enter a bill title.');
     if (!amount || isNaN(parseFloat(amount))) return Alert.alert('Missing', 'Enter a valid amount.');
@@ -71,6 +114,7 @@ export default function CreateBillScreen() {
         emoji_tag: emoji,
         game_mode: gameMode,
         participants: validParticipants.map((p) => ({ name: p.name.trim(), phone: p.phone.trim() || undefined })),
+        payment_details: buildPaymentDetails(),
       });
       router.replace(`/bill/${bill.id}`);
     } catch (e: any) {
@@ -85,6 +129,15 @@ export default function CreateBillScreen() {
   return (
     <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
       <ScrollView style={[styles.container, { backgroundColor: bg }]} contentContainerStyle={styles.content}>
+
+        {/* Cross-link badge */}
+        {params.ref === 'bajet-buddy' && (
+          <View style={[styles.crossLinkBadge, { backgroundColor: Colors.forestGreen + '15' }]}>
+            <Text style={[styles.crossLinkText, { color: Colors.forestGreen }]}>
+              📱 Linked from Bajet Buddy
+            </Text>
+          </View>
+        )}
 
         {/* Emoji picker */}
         <Text style={[styles.label, { color: subText }]}>Tag</Text>
@@ -181,6 +234,96 @@ export default function CreateBillScreen() {
           <Text style={[styles.addBtnText, { color: Colors.brandRed }]}>+ Add participant</Text>
         </TouchableOpacity>
 
+        {/* ── Payment Details (Level 1) ──────────────────────────────────── */}
+        <TouchableOpacity
+          style={[styles.sectionToggle, { borderColor }]}
+          onPress={() => setShowPaymentDetails((v) => !v)}
+        >
+          <Text style={[styles.sectionToggleText, { color: textColor }]}>
+            {showPaymentDetails ? '▾' : '▸'} Payment Details (optional)
+          </Text>
+          <Text style={[styles.sectionToggleHint, { color: subText }]}>
+            Help members know where to send money
+          </Text>
+        </TouchableOpacity>
+
+        {showPaymentDetails && (
+          <View style={[styles.paymentDetailsSection, { backgroundColor: cardBg, borderColor }]}>
+
+            {/* DuitNow */}
+            <Text style={[styles.subLabel, { color: Colors.turmericGold }]}>🇲🇾 DuitNow</Text>
+            <View style={styles.idTypeRow}>
+              {DUITNOW_ID_TYPES.map((t) => (
+                <TouchableOpacity
+                  key={t.key}
+                  style={[
+                    styles.idTypeChip,
+                    { borderColor, backgroundColor: duitnowIdType === t.key ? Colors.brandRed : inputBg },
+                  ]}
+                  onPress={() => setDuitnowIdType(t.key)}
+                >
+                  <Text style={{ color: duitnowIdType === t.key ? '#fff' : textColor, fontSize: 12, fontWeight: '600' }}>
+                    {t.label}
+                  </Text>
+                </TouchableOpacity>
+              ))}
+            </View>
+            <TextInput
+              style={inputStyle}
+              value={duitnowId}
+              onChangeText={setDuitnowId}
+              placeholder={duitnowIdType === 'phone' ? '60123456789' : duitnowIdType === 'nric' ? '990101-14-1234' : 'Registration no.'}
+              placeholderTextColor={Colors.gray500}
+              keyboardType={duitnowIdType === 'phone' ? 'phone-pad' : 'default'}
+            />
+
+            {/* Touch 'n Go */}
+            <Text style={[styles.subLabel, { color: Colors.turmericGold, marginTop: Spacing.md }]}>💳 Touch &apos;n Go</Text>
+            <TextInput
+              style={inputStyle}
+              value={tngPhone}
+              onChangeText={setTngPhone}
+              placeholder="TnG linked phone (60123456789)"
+              placeholderTextColor={Colors.gray500}
+              keyboardType="phone-pad"
+            />
+
+            {/* Bank Transfer */}
+            <Text style={[styles.subLabel, { color: Colors.turmericGold, marginTop: Spacing.md }]}>🏦 Bank Transfer</Text>
+            <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.bankRow}>
+              {BANKS.map((b) => (
+                <TouchableOpacity
+                  key={b}
+                  style={[
+                    styles.bankChip,
+                    { borderColor, backgroundColor: bankName === b ? Colors.brandRed : inputBg },
+                  ]}
+                  onPress={() => setBankName(b)}
+                >
+                  <Text style={{ color: bankName === b ? '#fff' : textColor, fontSize: 11, fontWeight: '600' }}>
+                    {b}
+                  </Text>
+                </TouchableOpacity>
+              ))}
+            </ScrollView>
+            <TextInput
+              style={inputStyle}
+              value={bankAccount}
+              onChangeText={setBankAccount}
+              placeholder="Account number"
+              placeholderTextColor={Colors.gray500}
+              keyboardType="number-pad"
+            />
+            <TextInput
+              style={[inputStyle, { marginTop: Spacing.xs }]}
+              value={bankHolder}
+              onChangeText={setBankHolder}
+              placeholder="Account holder name"
+              placeholderTextColor={Colors.gray500}
+            />
+          </View>
+        )}
+
         <TouchableOpacity
           style={[styles.submitBtn, loading && styles.submitDisabled]}
           onPress={handleSubmit}
@@ -215,6 +358,19 @@ const styles = StyleSheet.create({
   removeBtnText: { color: Colors.error, fontSize: 16 },
   addBtn: { borderWidth: 1.5, borderStyle: 'dashed', borderRadius: Radius.card, padding: Spacing.md, alignItems: 'center' },
   addBtnText: { fontSize: 14, fontWeight: '600' },
+  // Payment details section
+  sectionToggle: { marginTop: Spacing.lg, padding: Spacing.md, borderWidth: 1, borderRadius: Radius.card },
+  sectionToggleText: { fontSize: 14, fontWeight: '700' },
+  sectionToggleHint: { fontSize: 12, marginTop: 2 },
+  paymentDetailsSection: { padding: Spacing.md, borderWidth: 1, borderTopWidth: 0, borderBottomLeftRadius: Radius.card, borderBottomRightRadius: Radius.card },
+  subLabel: { fontSize: 13, fontWeight: '700', marginBottom: Spacing.xs },
+  idTypeRow: { flexDirection: 'row', gap: Spacing.xs, marginBottom: Spacing.xs },
+  idTypeChip: { paddingHorizontal: Spacing.sm + 4, paddingVertical: Spacing.xs + 2, borderRadius: Radius.chip, borderWidth: 1 },
+  bankRow: { flexDirection: 'row', marginBottom: Spacing.xs },
+  bankChip: { paddingHorizontal: Spacing.sm + 2, paddingVertical: Spacing.xs + 2, borderRadius: Radius.chip, borderWidth: 1, marginRight: Spacing.xs },
+  crossLinkBadge: { borderRadius: Radius.card, padding: Spacing.sm + 2, marginBottom: Spacing.sm, alignItems: 'center' },
+  crossLinkText: { fontSize: 13, fontWeight: '600' },
+  // Submit
   submitBtn: { backgroundColor: Colors.brandRed, borderRadius: Radius.button, padding: Spacing.md + 4, alignItems: 'center', marginTop: Spacing.md },
   submitDisabled: { opacity: 0.6 },
   submitText: { color: '#fff', fontSize: 17, fontWeight: '700' },

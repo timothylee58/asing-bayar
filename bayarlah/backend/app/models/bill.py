@@ -4,6 +4,21 @@ from datetime import date, datetime
 from decimal import Decimal
 
 
+class PaymentDetails(BaseModel):
+    """Organiser-provided payment destination details (Level 1).
+
+    Members see these on the share page so they know *where* to send money.
+    """
+
+    duitnow_id: Optional[str] = None
+    duitnow_id_type: Optional[str] = None  # "phone" | "nric" | "business"
+    duitnow_qr_url: Optional[str] = None  # Supabase Storage URL of uploaded QR image
+    tng_phone: Optional[str] = None
+    bank_name: Optional[str] = None
+    bank_account: Optional[str] = None
+    bank_holder: Optional[str] = None
+
+
 class ParticipantCreate(BaseModel):
     name: str
     phone: Optional[str] = None
@@ -19,6 +34,7 @@ class BillCreate(BaseModel):
     game_mode: str = "equal"
     split_mode: str = "equal"
     participants: list[ParticipantCreate]
+    payment_details: Optional[PaymentDetails] = None
 
 
 class BillResponse(BaseModel):
@@ -34,6 +50,7 @@ class BillResponse(BaseModel):
     created_at: datetime
     share_url: str
     receipt_url: Optional[str] = None
+    payment_details: Optional[PaymentDetails] = None
 
 
 class ParticipantResponse(BaseModel):
