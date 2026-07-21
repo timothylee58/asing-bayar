@@ -1,6 +1,7 @@
-# Bayar.lah 💸
+# Asing Bayar 💸
 
-> **Split duit, no awkward lah.**
+> **Asing bill dengan member?
+> Guna je Asing Bayar**
 
 A production-grade, mobile-first bill splitting app built for Malaysian lepak/yumcha/makan angin group culture — hawker runs, trips, housemate expenses, class events. Features gamified payment assignment via animated ladder draws and roulette wheels, real-time WebSocket dashboards, and Expo push notifications.
 
