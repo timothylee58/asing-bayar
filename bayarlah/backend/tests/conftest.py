@@ -33,8 +33,18 @@ def _build_supabase_mock():
     chain.single.return_value = chain
     chain.select.return_value = chain
     chain.insert.return_value = chain
+    chain.update.return_value = chain
     sb = MagicMock()
     sb.table.return_value = chain
+
+    storage_bucket = MagicMock()
+    storage_bucket.upload.return_value = MagicMock(data={"path": "test.jpg"}, error=None)
+    storage_bucket.get_public_url.return_value = (
+        "https://test.supabase.co/storage/v1/object/public/receipts/test.jpg"
+    )
+    sb.storage = MagicMock()
+    sb.storage.from_.return_value = storage_bucket
+
     return sb
 
 
