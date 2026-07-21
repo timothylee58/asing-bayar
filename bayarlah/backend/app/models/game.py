@@ -1,6 +1,7 @@
 from pydantic import BaseModel, UUID4
 from typing import Optional, Any
 from datetime import datetime
+from decimal import Decimal
 
 
 class TanggaGenerateRequest(BaseModel):
@@ -24,6 +25,16 @@ class RouletteLockRequest(BaseModel):
     bill_id: UUID4
     winner_participant_id: UUID4
     outcome: str
+
+
+class DaduRollRequest(BaseModel):
+    bill_id: UUID4
+    participant_ids: list[UUID4]
+    total_amount: Decimal
+
+
+class DaduLockRequest(BaseModel):
+    bill_id: UUID4
 
 
 class GameResultResponse(BaseModel):

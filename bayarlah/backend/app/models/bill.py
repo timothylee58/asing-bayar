@@ -7,6 +7,7 @@ from decimal import Decimal
 class ParticipantCreate(BaseModel):
     name: str
     phone: Optional[str] = None
+    amount_owed: Optional[Decimal] = None
 
 
 class BillCreate(BaseModel):
@@ -16,6 +17,7 @@ class BillCreate(BaseModel):
     due_date: Optional[date] = None
     emoji_tag: str = "🍽️"
     game_mode: str = "equal"
+    split_mode: str = "equal"
     participants: list[ParticipantCreate]
 
 
@@ -31,6 +33,7 @@ class BillResponse(BaseModel):
     game_mode: str
     created_at: datetime
     share_url: str
+    receipt_url: Optional[str] = None
 
 
 class ParticipantResponse(BaseModel):
