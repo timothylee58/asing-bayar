@@ -3,6 +3,7 @@
 import { useState, useEffect } from 'react';
 import { createClient } from '@supabase/supabase-js';
 import type { Bill, Participant, Payment, PaymentDetails } from '../../../types';
+import ConfettiBurst from '../../../components/motion/ConfettiBurst';
 
 function useRealtimePayments(billId: string, initial: Payment[]) {
   const [payments, setPayments] = useState<Payment[]>(initial);
@@ -192,6 +193,7 @@ export default function PayClientPage({ bill }: Props) {
   const [method, setMethod] = useState<string>('');
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string>('');
+  const [confettiSeed, setConfettiSeed] = useState<number | null>(null);
 
   const paymentAmount = selected ? (selected.amount_owed ?? bill.per_person) : bill.per_person;
 
@@ -216,6 +218,7 @@ export default function PayClientPage({ bill }: Props) {
         throw new Error(body.detail ?? 'Failed to confirm payment');
       }
       setStep('done');
+      setConfettiSeed(Date.now());
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Something went wrong');
     } finally {
@@ -225,6 +228,7 @@ export default function PayClientPage({ bill }: Props) {
 
   return (
     <div className="min-h-screen" style={{ backgroundColor: '#FAFAF8' }}>
+      <ConfettiBurst triggerSeed={confettiSeed} onComplete={() => setConfettiSeed(null)} />
       <div className="max-w-md mx-auto px-4 py-8">
 
         {/* Header */}
