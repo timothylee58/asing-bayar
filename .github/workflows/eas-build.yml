@@ -1,17 +1,25 @@
 name: EAS Build
 
+# Builds only after CI has passed on main. Release profiles read their EXPO_PUBLIC_* values
+# from EAS environment variables (eas env:create); app.config.ts fails the build if missing.
 on:
-  push:
+  workflow_run:
+    workflows: [CI]
+    types: [completed]
     branches: [main]
-    paths:
-      - 'bayarlah/mobile/**'
   workflow_dispatch:
+
+permissions:
+  contents: read
 
 jobs:
   build:
+    if: github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.workflow_run.head_sha || github.sha }}
 
       - uses: actions/setup-node@v4
         with:
