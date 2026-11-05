@@ -92,7 +92,13 @@ def redis() -> FakeRedis:
 
 
 @pytest.fixture
-def client(db, redis):
+def client(db, redis, monkeypatch):
+    async def _noop(*_a, **_k):  # no real pub/sub listener in API tests (covered by test_ws_fanout)
+        return None
+
+    monkeypatch.setattr("app.main.manager.start", _noop)
+    monkeypatch.setattr("app.main.manager.stop", _noop)
+    monkeypatch.setattr("app.main.get_redis", lambda: redis)
     app.dependency_overrides[get_supabase] = lambda: db
     app.dependency_overrides[get_redis] = lambda: redis
     with TestClient(app, raise_server_exceptions=False) as c:

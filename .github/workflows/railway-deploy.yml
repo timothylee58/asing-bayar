@@ -1,16 +1,24 @@
 name: Railway Deploy
 
+# Deploys only after CI has passed on main (previously this ran in parallel with CI,
+# so a red build still shipped).
 on:
-  push:
+  workflow_run:
+    workflows: [CI]
+    types: [completed]
     branches: [main]
-    paths:
-      - 'bayarlah/backend/**'
+
+permissions:
+  contents: read
 
 jobs:
   deploy:
+    if: github.event.workflow_run.conclusion == 'success'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.workflow_run.head_sha }}
 
       - name: Install Railway CLI
         run: npm install -g @railway/cli

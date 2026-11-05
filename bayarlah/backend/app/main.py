@@ -5,12 +5,15 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from app.api import bills, game, notifications, payments, public, ws
 from app.core.config import settings
-from app.core.dependencies import close_redis
+from app.core.dependencies import close_redis, get_redis
+from app.core.ws_manager import manager
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    await manager.start(get_redis())  # cross-worker WebSocket fan-out
     yield
+    await manager.stop()
     await close_redis()
 
 
