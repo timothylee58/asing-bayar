@@ -1,33 +1,41 @@
-import { useEffect, useRef, useState } from 'react';
+import { useRouter } from 'expo-router';
 import * as Notifications from 'expo-notifications';
-import Constants from 'expo-constants';
+import { useEffect, useRef } from 'react';
+import { registerPushToken } from '../lib/api';
 import {
-  registerForPushNotifications,
-  sendPushTokenToServer,
   addNotificationListener,
   addResponseListener,
+  registerForPushNotifications,
 } from '../lib/notifications';
-import { useRouter } from 'expo-router';
 
-const API_URL = (Constants.expoConfig?.extra?.apiUrl as string) ?? 'http://localhost:8000';
-
-export function usePushNotifications(participantId?: string) {
-  const [pushToken, setPushToken] = useState<string | null>(null);
+/**
+ * Registers this device for the signed-in organiser's 'X paid' pushes and
+ * deep-links a tapped notification to its bill.
+ *
+ * `userId` is undefined while signed out, so nothing is registered. (Before, the
+ * hook was called with no id and the token was never sent: organisers never got
+ * pushes, because the server also looked tokens up by a column nothing wrote.)
+ */
+export function usePushNotifications(userId?: string) {
+  const router = useRouter();
   const notifListener = useRef<Notifications.EventSubscription | null>(null);
   const responseListener = useRef<Notifications.EventSubscription | null>(null);
-  const router = useRouter();
 
   useEffect(() => {
+    if (!userId) return;
+    let cancelled = false;
     registerForPushNotifications().then((token) => {
-      if (!token) return;
-      setPushToken(token);
-      if (participantId) {
-        sendPushTokenToServer(token, participantId, API_URL);
-      }
+      if (!token || cancelled) return;
+      registerPushToken(token).catch((e) => console.warn('Failed to register push token:', e));
     });
+    return () => {
+      cancelled = true;
+    };
+  }, [userId]);
 
+  useEffect(() => {
     notifListener.current = addNotificationListener((notification) => {
-      // Notification received while app is foregrounded — no-op, WS handles live updates
+      // Foreground: no-op, the dashboard WebSocket already updates live.
       console.log('Push received (foreground):', notification.request.identifier);
     });
 
@@ -42,7 +50,5 @@ export function usePushNotifications(participantId?: string) {
       notifListener.current?.remove();
       responseListener.current?.remove();
     };
-  }, [participantId]);
-
-  return { pushToken };
+  }, [router]);
 }

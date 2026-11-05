@@ -1,9 +1,7 @@
-import { useEffect, useRef, useCallback, useState } from 'react';
-import Constants from 'expo-constants';
+import { useCallback, useEffect, useRef, useState } from 'react';
+import { WS_URL } from '../lib/config';
+import { supabase } from '../lib/supabase';
 import type { Bill, Payment } from '../types';
-
-const WS_URL = (Constants.expoConfig?.extra?.apiUrl as string ?? 'http://localhost:8000')
-  .replace(/^http/, 'ws');
 
 type WSMessage =
   | { type: 'init'; data: Bill }
@@ -16,6 +14,10 @@ interface Options {
   onPaymentConfirmed: (payment: Payment, name: string) => void;
 }
 
+/** The server closes with this code when the token is missing/invalid or not the bill's owner. */
+const CLOSE_UNAUTHORISED = 4401;
+const RECONNECT_MS = 3000;
+
 export function useDashboardWS({ billId, onInit, onPaymentConfirmed }: Options) {
   const ws = useRef<WebSocket | null>(null);
   const reconnectTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -23,7 +25,7 @@ export function useDashboardWS({ billId, onInit, onPaymentConfirmed }: Options) 
   const [connected, setConnected] = useState(false);
 
   const connect = useCallback(() => {
-    if (!mounted.current) return;
+    if (!mounted.current || !billId) return;
     if (ws.current) {
       ws.current.onclose = null;
       ws.current.close();
@@ -32,8 +34,16 @@ export function useDashboardWS({ billId, onInit, onPaymentConfirmed }: Options) 
     const socket = new WebSocket(`${WS_URL}/ws/dashboard/${billId}`);
     ws.current = socket;
 
-    socket.onopen = () => {
+    socket.onopen = async () => {
       if (!mounted.current) return;
+      // Authenticate with the first message (not the URL, which ends up in access logs).
+      const { data } = await supabase.auth.getSession();
+      const token = data.session?.access_token;
+      if (!token) {
+        socket.close();
+        return;
+      }
+      socket.send(JSON.stringify({ type: 'auth', token }));
       setConnected(true);
       if (reconnectTimer.current) {
         clearTimeout(reconnectTimer.current);
@@ -47,14 +57,17 @@ export function useDashboardWS({ billId, onInit, onPaymentConfirmed }: Options) 
         const msg: WSMessage = JSON.parse(event.data);
         if (msg.type === 'init') onInit(msg.data);
         else if (msg.type === 'payment_confirmed') onPaymentConfirmed(msg.payment, msg.participant_name);
-      } catch {}
+      } catch {
+        // Ignore malformed frames.
+      }
     };
 
-    socket.onclose = () => {
+    socket.onclose = (event) => {
       if (!mounted.current) return;
       setConnected(false);
-      // Reconnect after 3s
-      reconnectTimer.current = setTimeout(connect, 3000);
+      // A rejected login will be rejected again: don't hammer the server.
+      if (event.code === CLOSE_UNAUTHORISED) return;
+      reconnectTimer.current = setTimeout(connect, RECONNECT_MS);
     };
 
     socket.onerror = () => {

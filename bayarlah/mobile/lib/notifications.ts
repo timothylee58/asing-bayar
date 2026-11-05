@@ -55,22 +55,6 @@ export async function registerForPushNotifications(): Promise<string | null> {
   return token;
 }
 
-export async function sendPushTokenToServer(
-  token: string,
-  participantId: string,
-  apiUrl: string,
-): Promise<void> {
-  try {
-    await fetch(`${apiUrl}/api/notifications/register`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ token, participant_id: participantId }),
-    });
-  } catch (e) {
-    console.warn('Failed to register push token:', e);
-  }
-}
-
 export function addNotificationListener(
   handler: (notification: Notifications.Notification) => void,
 ) {

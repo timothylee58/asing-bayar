@@ -1,37 +1,58 @@
 'use client';
 
-import { useState, useEffect } from 'react';
-import { createClient } from '@supabase/supabase-js';
-import type { Bill, Participant, Payment, PaymentDetails } from '../../../types';
+import { useCallback, useEffect, useState } from 'react';
+import { ApiError, confirmPayment, fetchPublicBill } from '../../../lib/api';
+import type { Bill, Participant, PaymentDetails } from '../../../types';
 import ConfettiBurst from '../../../components/motion/ConfettiBurst';
 
-function useRealtimePayments(billId: string, initial: Payment[]) {
-  const [payments, setPayments] = useState<Payment[]>(initial);
+const POLL_INTERVAL_MS = 8000;
+
+/**
+ * Keeps the bill fresh. The share page used to subscribe to the database directly
+ * with the public anon key, which meant the whole database had to be world-readable.
+ * It now polls the sanitised public API instead - only while the tab is visible,
+ * and immediately when the tab comes back into view.
+ */
+function useLiveBill(initial: Bill) {
+  const [bill, setBill] = useState<Bill>(initial);
+
+  const refresh = useCallback(async () => {
+    try {
+      const next = await fetchPublicBill(initial.id);
+      if (next) setBill(next);
+    } catch {
+      // Offline or rate limited: keep showing the last good data and try again next tick.
+    }
+  }, [initial.id]);
 
   useEffect(() => {
-    const supabase = createClient(
-      process.env.NEXT_PUBLIC_SUPABASE_URL!,
-      process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
-    );
+    let timer: ReturnType<typeof setInterval> | undefined;
+    const stop = () => {
+      if (timer) clearInterval(timer);
+      timer = undefined;
+    };
+    const start = () => {
+      stop();
+      timer = setInterval(refresh, POLL_INTERVAL_MS);
+    };
+    const onVisibility = () => {
+      if (document.visibilityState === 'visible') {
+        void refresh();
+        start();
+      } else {
+        stop();
+      }
+    };
 
-    const channel = supabase
-      .channel(`payments:bill:${billId}`)
-      .on(
-        'postgres_changes',
-        { event: 'INSERT', schema: 'public', table: 'payments', filter: `bill_id=eq.${billId}` },
-        (payload) => {
-          setPayments((prev) => {
-            if (prev.some((p) => p.id === payload.new.id)) return prev;
-            return [...prev, payload.new as Payment];
-          });
-        }
-      )
-      .subscribe();
+    start();
+    document.addEventListener('visibilitychange', onVisibility);
+    return () => {
+      stop();
+      document.removeEventListener('visibilitychange', onVisibility);
+    };
+  }, [refresh]);
 
-    return () => { supabase.removeChannel(channel); };
-  }, [billId]);
-
-  return payments;
+  return { bill, refresh };
 }
 
 const PAYMENT_METHODS = [
@@ -85,6 +106,9 @@ function PaymentInstructions({
         </p>
         {details.duitnow_qr_url && (
           <div className="flex justify-center mb-3">
+            {/* A payment QR must render exactly as uploaded. next/image would resample it, and
+                would route a user-supplied URL through the /_next/image optimizer. */}
+            {/* eslint-disable-next-line @next/next/no-img-element */}
             <img
               src={details.duitnow_qr_url}
               alt="DuitNow QR Code"
@@ -181,12 +205,10 @@ interface Props {
 
 type Step = 'select' | 'method' | 'done';
 
-export default function PayClientPage({ bill }: Props) {
-  const payments = useRealtimePayments(bill.id, bill.payments ?? []);
-  const paidIds = new Set(payments.map((p) => p.participant_id));
-  const collected = payments.reduce((s, p) => s + Number(p.amount), 0);
-
-  const unpaidParticipants = (bill.participants ?? []).filter((p: Participant) => !paidIds.has(p.id));
+export default function PayClientPage({ bill: initialBill }: Props) {
+  const { bill, refresh } = useLiveBill(initialBill);
+  const paidIds = new Set(bill.payments.map((p) => p.participant_id));
+  const unpaidParticipants = bill.participants.filter((p: Participant) => !paidIds.has(p.id));
 
   const [step, setStep] = useState<Step>('select');
   const [selected, setSelected] = useState<Participant | null>(null);
@@ -195,31 +217,26 @@ export default function PayClientPage({ bill }: Props) {
   const [error, setError] = useState<string>('');
   const [confettiSeed, setConfettiSeed] = useState<number | null>(null);
 
-  const paymentAmount = selected ? (selected.amount_owed ?? bill.per_person) : bill.per_person;
+  const paymentAmount = selected?.amount_owed ?? bill.per_person ?? 0;
 
   const handleConfirm = async () => {
     if (!selected || !method) return;
     setSubmitting(true);
     setError('');
     try {
-      const apiUrl = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:8000';
-      const res = await fetch(`${apiUrl}/api/payments/confirm`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          participant_id: selected.id,
-          bill_id: bill.id,
-          amount: selected.amount_owed ?? bill.per_person,
-          method,
-        }),
-      });
-      if (!res.ok) {
-        const body = await res.json().catch(() => ({}));
-        throw new Error(body.detail ?? 'Failed to confirm payment');
-      }
+      await confirmPayment({ billId: bill.id, participantId: selected.id, method });
       setStep('done');
       setConfettiSeed(Date.now());
+      void refresh();
     } catch (e) {
+      if (e instanceof ApiError && e.status === 409) {
+        // Already marked as paid (e.g. from another device): show the truth, not an error.
+        setSelected(null);
+        setMethod('');
+        setStep('select');
+        void refresh();
+        return;
+      }
       setError(e instanceof Error ? e.message : 'Something went wrong');
     } finally {
       setSubmitting(false);
@@ -246,15 +263,17 @@ export default function PayClientPage({ bill }: Props) {
         </div>
 
         {/* Progress */}
-        <ProgressBar collected={collected} total={bill.total_amount} />
+        <ProgressBar collected={bill.collected} total={bill.total_amount} />
 
-        {/* Per person */}
-        <div className="rounded-xl p-4 mb-6 text-center" style={{ backgroundColor: '#fff' }}>
-          <p className="text-stone-500 text-sm">Per person</p>
-          <p className="text-3xl font-extrabold" style={{ color: '#C8410A' }}>
-            RM {bill.per_person?.toFixed(2)}
-          </p>
-        </div>
+        {/* Per person (custom splits have no single figure: each name shows its own share) */}
+        {bill.per_person != null && (
+          <div className="rounded-xl p-4 mb-6 text-center" style={{ backgroundColor: '#fff' }}>
+            <p className="text-stone-500 text-sm">Per person</p>
+            <p className="text-3xl font-extrabold" style={{ color: '#C8410A' }}>
+              RM {bill.per_person.toFixed(2)}
+            </p>
+          </div>
+        )}
 
         {/* Step: select participant */}
         {step === 'select' && (
@@ -279,7 +298,7 @@ export default function PayClientPage({ bill }: Props) {
                   >
                     <span>{p.name}</span>
                     <span className="text-sm font-bold" style={{ color: '#C8410A' }}>
-                      RM {(p.amount_owed ?? bill.per_person).toFixed(2)}
+                      RM {(p.amount_owed ?? bill.per_person ?? 0).toFixed(2)}
                     </span>
                   </button>
                 ))}
@@ -290,7 +309,7 @@ export default function PayClientPage({ bill }: Props) {
             {paidIds.size > 0 && (
               <div className="mt-4">
                 <p className="text-xs text-stone-400 uppercase tracking-widest mb-2">Already paid</p>
-                {(bill.participants ?? [])
+                {bill.participants
                   .filter((p) => paidIds.has(p.id))
                   .map((p) => (
                     <div key={p.id} className="flex items-center gap-2 py-2 text-sm text-stone-400">

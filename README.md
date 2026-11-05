@@ -198,7 +198,7 @@ bayarlah/
 │   ├── constants/
 │   │   └── theme.ts                # Colors, Radius, Spacing, EMOJI_TAGS
 │   ├── types/index.ts              # Bill, Participant, Payment, GameResult
-│   ├── app.json                    # Expo config — scheme, plugins, EAS projectId
+│   ├── app.config.ts               # Expo config — env-driven; fails release builds if misconfigured
 │   ├── eas.json                    # EAS profiles (dev/preview/production)
 │   └── babel.config.js             # Reanimated plugin (must be last)
 │
@@ -335,11 +335,8 @@ npm run dev
 cd mobile
 npm install
 
-# Edit app.json → extra block:
-#   supabaseUrl     → your Supabase project URL
-#   supabaseAnonKey → your Supabase anon key
-#   apiUrl          → http://localhost:8000
-#   webUrl          → http://localhost:3000
+cp .env.example .env   # then fill in EXPO_PUBLIC_* (API URL, web URL, Supabase URL + anon key)
+# Sign in with an email code (Supabase email OTP; the template must include {{ .Token }})
 
 npx expo start
 # Scan QR with Expo Go (iOS/Android)
@@ -368,18 +365,20 @@ npx expo start
 
 | Variable | Required | Description |
 |----------|----------|-------------|
-| `NEXT_PUBLIC_SUPABASE_URL` | Yes | Supabase project URL |
-| `NEXT_PUBLIC_SUPABASE_ANON_KEY` | Yes | Supabase anon key |
 | `NEXT_PUBLIC_API_URL` | Yes | FastAPI base URL |
 
-### Mobile (`mobile/app.json` → `extra`)
+### Mobile (`mobile/.env` locally; EAS environment variables for release builds)
 
-| Key | Description |
-|-----|-------------|
-| `supabaseUrl` | Supabase project URL |
-| `supabaseAnonKey` | Supabase anon key |
-| `apiUrl` | FastAPI base URL |
-| `webUrl` | Web share page base URL |
+| Variable | Description |
+|----------|-------------|
+| `EXPO_PUBLIC_API_URL` | FastAPI base URL |
+| `EXPO_PUBLIC_WEB_URL` | Web share page origin |
+| `EXPO_PUBLIC_SUPABASE_URL` | Supabase project URL (sign-in only) |
+| `EXPO_PUBLIC_SUPABASE_ANON_KEY` | Supabase anon key |
+| `EAS_PROJECT_ID` | Required for release builds (push tokens) |
+| `GOOGLE_SERVICES_JSON` | Production Android: file variable for `google-services.json` |
+
+`preview`/`production` builds fail at config time if any of these are missing or the API URL is localhost.
 
 ---
 
@@ -500,8 +499,6 @@ aws ecr get-login-password --region ap-southeast-1 \
 
 # Build (env vars baked in at build time for Next.js NEXT_PUBLIC_* vars)
 docker build \
-  --build-arg NEXT_PUBLIC_SUPABASE_URL=https://your-project.supabase.co \
-  --build-arg NEXT_PUBLIC_SUPABASE_ANON_KEY=your-anon-key \
   --build-arg NEXT_PUBLIC_API_URL=https://your-backend.railway.app \
   -t bayarlah-web .
 
@@ -534,7 +531,7 @@ cd mobile
 
 # One-time: link to EAS project
 eas init
-# Copy the generated project ID into mobile/app.json → extra.eas.projectId
+# Set the generated project ID as the EAS_PROJECT_ID environment variable (eas env:create)
 
 # Preview APK (sideloadable on Android — good for testing)
 eas build --platform android --profile preview
@@ -551,9 +548,9 @@ eas update --channel production --message "Fix nudge cooldown display"
 
 | Profile | API URL | Distribution |
 |---------|---------|--------------|
-| `development` | `localhost:8000` | Internal (dev client) |
-| `preview` | Railway backend | Internal APK |
-| `production` | Railway backend | Store (Play / App Store) |
+| `development` | from `.env` | Internal (dev client) |
+| `preview` | from EAS env vars | Internal APK |
+| `production` | from EAS env vars | Store (Play / App Store) |
 
 ---
 

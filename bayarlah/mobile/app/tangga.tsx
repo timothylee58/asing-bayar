@@ -21,7 +21,6 @@ import * as Haptics from 'expo-haptics';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { generateTangga, lockTangga } from '../lib/api';
 import {
-  generateLadder,
   computeAllPaths,
   type Rung,
   type ParticipantPath,
@@ -301,9 +300,9 @@ export default function TanggaScreen() {
         participant_ids: participantIds,
         outcome_labels: outcomeLabels,
       });
-      const ladder = generateLadder(res.n_lanes, res.seed);
-      const paths = computeAllPaths(res.n_lanes, ladder.rungs);
-      setRungs(ladder.rungs);
+      // Use the SERVER's ladder verbatim: it derives everyone's outcome from these rungs.
+      const paths = computeAllPaths(res.n_lanes, res.rungs);
+      setRungs(res.rungs);
       setSeed(res.seed);
       setAllPaths(paths);
 
@@ -394,12 +393,15 @@ export default function TanggaScreen() {
 
     function playNext(participantIdx: number) {
       if (participantIdx >= nLanes) {
-        // All done — lock results
-        const resultMap: Record<string, string> = {};
-        resultList.forEach(({ name, label }, i) => {
-          resultMap[participantIds[i]] = label;
+        // All done. Send only the lane each player picked: the server derives (and records)
+        // the outcomes itself, so the saved result cannot be edited from the client.
+        const lanes: Record<string, number> = {};
+        participantIds.forEach((id, i) => {
+          lanes[id] = laneAssignment[i];
         });
-        lockTangga({ bill_id: billId, result: resultMap }).catch(() => {});
+        lockTangga({ bill_id: billId, lanes }).catch((e: unknown) => {
+          Alert.alert('Result not saved', e instanceof Error ? e.message : 'Could not save the result.');
+        });
         setResults(resultList);
         setRevealedEndLanes([...revealed]);
         setPhase('done');

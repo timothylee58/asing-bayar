@@ -9,7 +9,8 @@ import {
   useColorScheme,
 } from 'react-native';
 import { useRouter } from 'expo-router';
-import { listBills } from '../lib/api';
+import { ApiError, listBills } from '../lib/api';
+import { useAuth } from '../lib/auth';
 import { Colors, Spacing, Radius } from '../constants/theme';
 import type { Bill } from '../types';
 
@@ -17,20 +18,26 @@ export default function HomeScreen() {
   const router = useRouter();
   const scheme = useColorScheme();
   const isDark = scheme === 'dark';
+  const { signOut } = useAuth();
   const [bills, setBills] = useState<Bill[]>([]);
   const [loading, setLoading] = useState(false);
+  const [error, setError] = useState('');
 
   const load = useCallback(async () => {
     setLoading(true);
+    setError('');
     try {
-      const data = await listBills();
-      setBills(data);
-    } catch {
-      // unauthenticated — show empty state
+      setBills(await listBills());
+    } catch (e) {
+      if (e instanceof ApiError && e.status === 401) {
+        await signOut(); // expired/invalid session: back to the sign-in screen
+        return;
+      }
+      setError(e instanceof Error ? e.message : 'Could not load your bills.');
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [signOut]);
 
   useEffect(() => { load(); }, [load]);
 
@@ -45,8 +52,16 @@ export default function HomeScreen() {
         keyExtractor={(b) => b.id}
         contentContainerStyle={styles.list}
         refreshControl={<RefreshControl refreshing={loading} onRefresh={load} tintColor={Colors.brandRed} />}
+        ListHeaderComponent={
+          error ? (
+            <TouchableOpacity onPress={load} style={styles.errorBox}>
+              <Text style={styles.errorText}>{error}</Text>
+              <Text style={styles.errorRetry}>Tap to retry</Text>
+            </TouchableOpacity>
+          ) : null
+        }
         ListEmptyComponent={
-          !loading ? (
+          !loading && !error ? (
             <View style={styles.empty}>
               <Text style={[styles.emptyTitle, { color: textColor }]}>No bills yet</Text>
               <Text style={[styles.emptyHint, { color: subText }]}>Tap + to create your first bill</Text>
@@ -104,6 +119,9 @@ const styles = StyleSheet.create({
   cardSub: { fontSize: 13, marginTop: 2 },
   badge: { borderRadius: Radius.chip, paddingHorizontal: 10, paddingVertical: 4 },
   badgeText: { color: '#fff', fontSize: 12, fontWeight: '600' },
+  errorBox: { backgroundColor: Colors.gray100, borderRadius: Radius.card, padding: Spacing.md, marginBottom: Spacing.sm },
+  errorText: { color: Colors.error, fontSize: 14 },
+  errorRetry: { color: Colors.gray500, fontSize: 12, marginTop: 4 },
   empty: { alignItems: 'center', marginTop: 80, gap: Spacing.sm },
   emptyTitle: { fontSize: 20, fontWeight: '700' },
   emptyHint: { fontSize: 14 },

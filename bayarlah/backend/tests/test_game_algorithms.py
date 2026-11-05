@@ -5,7 +5,8 @@ os.environ.setdefault("SUPABASE_SERVICE_KEY", "test-service-key")
 os.environ.setdefault("SUPABASE_ANON_KEY", "test-anon-key")
 
 import string
-from app.api.game import _make_seed, _generate_tangga_rungs, _traverse_tangga
+
+from app.api.game import _generate_tangga_rungs, _make_seed, _traverse_tangga
 
 
 class TestMakeSeed:

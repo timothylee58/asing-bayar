@@ -17,13 +17,13 @@ from __future__ import annotations
 import hashlib
 import hmac
 from abc import ABC, abstractmethod
+from collections.abc import Mapping
 from decimal import Decimal
 from typing import Any
 
 import httpx
 
 from app.core.config import settings
-
 
 # ── Method mapping ─────────────────────────────────────────────────────────────
 
@@ -75,9 +75,23 @@ class PaymentGateway(ABC):
         """Create a payment request and return the redirect/QR info."""
         ...
 
+    #: True only for the no-op development gateway. The webhook route refuses
+    #: stub gateways in production.
+    is_stub: bool = False
+
     @abstractmethod
-    def verify_webhook(self, *, payload: bytes, signature: str) -> bool:
-        """Verify the webhook signature from the gateway."""
+    def verify_webhook(
+        self,
+        *,
+        raw_body: bytes,
+        headers: Mapping[str, str],
+        fields: Mapping[str, Any] | None = None,
+    ) -> bool:
+        """Verify a webhook really came from the gateway (keyed by our secret).
+
+        `raw_body` is the exact bytes received, `headers` the request headers
+        (case-insensitive lookups expected) and `fields` the parsed body.
+        """
         ...
 
     @abstractmethod
@@ -154,16 +168,41 @@ class HitPayGateway(PaymentGateway):
             raw=data,
         )
 
-    def verify_webhook(self, *, payload: bytes, signature: str) -> bool:
-        """HitPay uses HMAC-SHA256 with the webhook salt."""
+    def verify_webhook(
+        self,
+        *,
+        raw_body: bytes,
+        headers: Mapping[str, str],
+        fields: Mapping[str, Any] | None = None,
+    ) -> bool:
+        """HMAC-SHA256 keyed with the webhook salt.
+
+        UNVERIFIED AGAINST HITPAY'S DOCS: when this was written the docs were not
+        reachable, so two documented-in-the-wild schemes are accepted - a hex
+        digest of the raw body in a signature header, or an `hmac` body field
+        over the sorted key+value pairs. Both are keyed by the secret salt, so
+        accepting either does not weaken the check. Confirm which one HitPay
+        actually sends in the sandbox before enabling the gateway in production.
+        """
         if not self.webhook_salt:
             return False
-        expected = hmac.new(
-            self.webhook_salt.encode(),
-            payload,
-            hashlib.sha256,
-        ).hexdigest()
-        return hmac.compare_digest(expected, signature)
+        key = self.webhook_salt.encode()
+
+        header_sig = headers.get("hitpay-signature") or headers.get("x-hitpay-signature")
+        if header_sig:
+            expected = hmac.new(key, raw_body, hashlib.sha256).hexdigest()
+            if hmac.compare_digest(expected.encode(), header_sig.strip().lower().encode()):
+                return True
+
+        if fields and fields.get("hmac"):
+            signed = "".join(
+                f"{k}{fields[k]}" for k in sorted(fields) if k != "hmac"
+            )
+            expected = hmac.new(key, signed.encode(), hashlib.sha256).hexdigest()
+            if hmac.compare_digest(expected.encode(), str(fields["hmac"]).strip().lower().encode()):
+                return True
+
+        return False
 
     def parse_webhook(self, body: dict[str, Any]) -> dict[str, Any]:
         """Normalise HitPay webhook payload."""
@@ -180,7 +219,9 @@ class HitPayGateway(PaymentGateway):
 
 
 class StubGateway(PaymentGateway):
-    """No-op gateway for local development / testing."""
+    """No-op gateway for local development / testing. Never used in production."""
+
+    is_stub = True
 
     async def create_payment(self, **kwargs: Any) -> PaymentResult:
         return PaymentResult(
@@ -190,7 +231,13 @@ class StubGateway(PaymentGateway):
             status="pending",
         )
 
-    def verify_webhook(self, *, payload: bytes, signature: str) -> bool:
+    def verify_webhook(
+        self,
+        *,
+        raw_body: bytes,
+        headers: Mapping[str, str],
+        fields: Mapping[str, Any] | None = None,
+    ) -> bool:
         return True
 
     def parse_webhook(self, body: dict[str, Any]) -> dict[str, Any]:
@@ -207,9 +254,11 @@ class StubGateway(PaymentGateway):
 
 
 def get_gateway() -> PaymentGateway:
-    """Return the configured payment gateway instance.
+    """Return the configured payment gateway.
 
-    Uses StubGateway when gateway is disabled or in development without keys.
+    Disabled -> the stub (dev only; the routes refuse it in production). Enabled
+    -> the real provider, and a misconfiguration is an error, never a silent
+    downgrade to the stub (which accepts unsigned webhooks).
     """
     if not settings.PAYMENT_GATEWAY_ENABLED:
         return StubGateway()
@@ -217,8 +266,7 @@ def get_gateway() -> PaymentGateway:
     provider = settings.PAYMENT_GATEWAY_PROVIDER.lower()
     if provider == "hitpay":
         if not settings.HITPAY_API_KEY:
-            return StubGateway()
+            raise RuntimeError("PAYMENT_GATEWAY_ENABLED but HITPAY_API_KEY is not set")
         return HitPayGateway()
 
-    # Future: add "stripe", "airwallex" branches here
-    return StubGateway()
+    raise RuntimeError(f"Unsupported payment gateway provider: {provider!r}")

@@ -1,54 +1,28 @@
-"""FastAPI endpoint tests — only tests endpoints that don't need live DB/Redis."""
-from fastapi.testclient import TestClient
-
-from app.main import app
-
-client = TestClient(app)
+"""Liveness + routing smoke tests (all via fakes - no live Supabase/Redis)."""
+import pytest
 
 
-def test_health_returns_200():
+def test_health_is_up_and_reveals_nothing_else(client):
     res = client.get("/health")
-    assert res.status_code == 200
+    assert res.status_code == 200 and res.json() == {"status": "ok"}
 
 
-def test_health_body():
-    res = client.get("/health")
-    data = res.json()
-    assert data["status"] == "ok"
-    assert "env" in data
+def test_docs_available_in_dev(client):
+    assert client.get("/docs").status_code == 200
 
 
-def test_health_default_env():
-    res = client.get("/health")
-    # In test environment the ENV defaults to "development"
-    assert res.json()["env"] == "development"
-
-
-def test_docs_available_in_dev():
-    # Swagger docs should be served when ENV != "production"
-    res = client.get("/docs")
-    assert res.status_code == 200
-
-
-def test_openapi_schema():
+def test_openapi_schema(client):
     res = client.get("/openapi.json")
     assert res.status_code == 200
-    schema = res.json()
-    assert schema["info"]["title"] == "Bayar.lah API"
+    assert res.json()["info"]["title"] == "Bayar.lah API"
 
 
-def test_bills_route_exists():
-    # Unauthenticated POST to /api/bills should return 403 (missing auth),
-    # not 404 — proves the router is registered.
-    res = client.post("/api/bills", json={})
-    assert res.status_code in (401, 403, 422)
-
-
-def test_payments_confirm_route_exists():
-    res = client.post("/api/payments/confirm", json={})
-    assert res.status_code in (401, 403, 422)
-
-
-def test_notifications_register_route_exists():
-    res = client.post("/api/notifications/register", json={})
-    assert res.status_code in (400, 422)
+@pytest.mark.parametrize("method,path,expected", [
+    ("post", "/api/bills", 401),                       # organiser-only
+    ("post", "/api/notifications/register", 401),      # organiser-only (used to be open)
+    ("post", "/api/game/tangga/generate", 401),        # organiser-only (used to be open)
+    ("post", "/api/payments/confirm", 422),            # public, but the body is validated
+    ("get", "/api/public/bills/not-a-uuid", 422),      # public, id is validated
+])
+def test_routers_are_registered_and_guarded(client, method, path, expected):
+    assert getattr(client, method)(path, **({"json": {}} if method == "post" else {})).status_code == expected

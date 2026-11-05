@@ -1,21 +1,20 @@
 """Pydantic model validation tests — no network calls."""
-import pytest
-from decimal import Decimal
 from datetime import date
+from decimal import Decimal
 from uuid import uuid4
 
+import pytest
 from pydantic import ValidationError
 
 from app.models.bill import BillCreate, ParticipantCreate
-from app.models.payment import PaymentConfirm
 from app.models.game import (
+    RouletteLockRequest,
+    RouletteSpinRequest,
     TanggaGenerateRequest,
     TanggaLockRequest,
-    RouletteSpinRequest,
-    RouletteLockRequest,
 )
 from app.models.notification import PushTokenRegister
-
+from app.models.payment import PaymentConfirm
 
 # ---------------------------------------------------------------------------
 # BillCreate
@@ -71,9 +70,24 @@ def test_participant_create_phone_optional():
     assert p.phone is None
 
 
-def test_participant_create_with_phone():
-    p = ParticipantCreate(name="Siti", phone="+60123456789")
-    assert p.phone == "+60123456789"
+@pytest.mark.parametrize("given,expected", [
+    ("+60123456789", "60123456789"),      # wa.me wants digits only
+    ("0123456789", "60123456789"),        # local Malaysian number
+    ("012-345 6789", "60123456789"),      # punctuation from a text field
+    ("+65 9123 4567", "6591234567"),      # other countries keep their code
+])
+def test_participant_phone_is_normalised(given, expected):
+    assert ParticipantCreate(name="Siti", phone=given).phone == expected
+
+
+@pytest.mark.parametrize("bad", ["123", "abc", "1" * 16])
+def test_participant_phone_must_be_plausible(bad):
+    with pytest.raises(ValidationError):
+        ParticipantCreate(name="Siti", phone=bad)
+
+
+def test_blank_phone_is_treated_as_none():
+    assert ParticipantCreate(name="Siti", phone="  ").phone is None
 
 
 # ---------------------------------------------------------------------------
@@ -90,9 +104,21 @@ def test_payment_confirm_valid():
     assert p.method == "duitnow"
 
 
-def test_payment_confirm_requires_all_fields():
+def test_payment_confirm_requires_ids_and_method():
     with pytest.raises(ValidationError):
-        PaymentConfirm(participant_id=uuid4(), bill_id=uuid4(), method="cash")
+        PaymentConfirm(participant_id=uuid4(), bill_id=uuid4())  # no method
+    with pytest.raises(ValidationError):
+        PaymentConfirm(bill_id=uuid4(), method="cash")           # no participant
+
+
+def test_payment_confirm_amount_is_optional_because_the_server_decides_it():
+    assert PaymentConfirm(participant_id=uuid4(), bill_id=uuid4(), method="cash").amount is None
+
+
+@pytest.mark.parametrize("amount", ["0", "-1", "1.234"])
+def test_payment_confirm_rejects_nonsense_amounts(amount):
+    with pytest.raises(ValidationError):
+        PaymentConfirm(participant_id=uuid4(), bill_id=uuid4(), method="cash", amount=amount)
 
 
 # ---------------------------------------------------------------------------
@@ -109,13 +135,11 @@ def test_tangga_generate_request_valid():
     assert len(req.participant_ids) == 3
 
 
-def test_tangga_lock_request_valid():
-    pid = str(uuid4())
-    req = TanggaLockRequest(
-        bill_id=uuid4(),
-        result={pid: "Kena kau!"},
-    )
-    assert pid in req.result
+def test_tangga_lock_request_takes_lane_picks_not_results():
+    a, b = uuid4(), uuid4()
+    req = TanggaLockRequest(bill_id=uuid4(), lanes={str(a): 0, str(b): 1})
+    assert req.lanes == {a: 0, b: 1}
+    assert not hasattr(req, "result")
 
 
 # ---------------------------------------------------------------------------
@@ -133,10 +157,15 @@ def test_roulette_spin_request_defaults():
 def test_roulette_spin_request_no_belanja():
     req = RouletteSpinRequest(
         bill_id=uuid4(),
-        participant_ids=[uuid4()],
+        participant_ids=[uuid4(), uuid4()],
         include_belanja_segment=False,
     )
     assert req.include_belanja_segment is False
+
+
+def test_roulette_needs_at_least_two_players():
+    with pytest.raises(ValidationError):
+        RouletteSpinRequest(bill_id=uuid4(), participant_ids=[uuid4()])
 
 
 def test_roulette_lock_request_valid():
@@ -153,8 +182,10 @@ def test_roulette_lock_request_valid():
 # ---------------------------------------------------------------------------
 
 def test_push_token_register_valid():
-    t = PushTokenRegister(
-        token="ExponentPushToken[abc123]",
-        participant_id=str(uuid4()),
-    )
+    t = PushTokenRegister(token="ExponentPushToken[abc123]")
     assert t.token.startswith("ExponentPushToken[")
+
+
+def test_push_token_identity_is_not_client_supplied():
+    t = PushTokenRegister(token="ExponentPushToken[abc123]", user_id="someone-else", participant_id="x")
+    assert not hasattr(t, "user_id") and not hasattr(t, "participant_id")
