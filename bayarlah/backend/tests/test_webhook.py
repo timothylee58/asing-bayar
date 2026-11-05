@@ -168,10 +168,12 @@ def test_payment_write_routes_are_an_explicit_allowlist():
     update this set AND add auth/ownership tests for it (see test_auth_matrix.py)."""
     from app.main import app
 
+    # Read the route table from the OpenAPI schema: FastAPI >= 0.16x keeps included routers as
+    # lazy `_IncludedRouter` entries, so `app.routes` no longer lists their endpoints.
+    write_methods = {"post", "put", "patch", "delete"}
     writes = {
-        r.path for r in app.routes
-        if getattr(r, "methods", None) and r.methods & {"POST", "PUT", "PATCH", "DELETE"}
-        and r.path.startswith("/api/payments")
+        path for path, ops in app.openapi()["paths"].items()
+        if path.startswith("/api/payments") and write_methods & set(ops)
     }
     assert writes == {
         "/api/payments/confirm",           # members, no login: validated + rate limited
