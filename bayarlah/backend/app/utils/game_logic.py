@@ -1,10 +1,15 @@
 """Pure deterministic game logic — no I/O dependencies."""
 import random
+import secrets
 import string
 
 
 def make_seed(n: int = 8) -> str:
-    return "".join(random.choices(string.ascii_lowercase + string.digits, k=n))
+    """Unpredictable seed. Outcomes derive deterministically from it (so a game
+    can be replayed and audited), which only works if the seed itself cannot be
+    guessed - hence the CSPRNG rather than `random`."""
+    alphabet = string.ascii_lowercase + string.digits
+    return "".join(secrets.choice(alphabet) for _ in range(n))
 
 
 def generate_tangga_rungs(n_lanes: int, seed: str) -> list[dict]:

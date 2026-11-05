@@ -1,14 +1,9 @@
-from pydantic import BaseModel
+from typing import Annotated
+
+from pydantic import BaseModel, StringConstraints
 
 
 class PushTokenRegister(BaseModel):
-    token: str
-    participant_id: str
+    """Organiser device token. Identity comes from the auth token, never the body."""
 
-
-class PushMessage(BaseModel):
-    to: str
-    title: str
-    body: str
-    data: dict = {}
-    sound: str = "default"
+    token: Annotated[str, StringConstraints(strip_whitespace=True, min_length=20, max_length=200)]

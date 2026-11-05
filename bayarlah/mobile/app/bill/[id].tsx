@@ -18,9 +18,8 @@ import { useDashboardWS } from '../../hooks/useDashboardWS';
 import { AnimatedProgressRing } from '../../components/AnimatedProgressRing';
 import { Confetti } from '../../components/Confetti';
 import { Colors, Spacing, Radius } from '../../constants/theme';
+import { WEB_URL } from '../../lib/config';
 import type { Bill, Participant, Payment } from '../../types';
-
-const WEB_BASE = process.env.EXPO_PUBLIC_WEB_URL ?? 'http://localhost:3000';
 
 function Toast({ message, visible }: { message: string; visible: boolean }) {
   const opacity = useRef(new Animated.Value(0)).current;
@@ -92,8 +91,8 @@ export default function BillSummaryScreen() {
       const data = await getBill(id);
       setBill(data);
       setPayments(data.payments ?? []);
-    } catch {
-      Alert.alert('Error', 'Could not load bill.');
+    } catch (e) {
+      Alert.alert('Error', e instanceof Error ? e.message : 'Could not load bill.');
     } finally {
       setLoading(false);
     }
@@ -129,7 +128,7 @@ export default function BillSummaryScreen() {
 
   const shareLink = () => {
     if (!bill) return;
-    const url = `${WEB_BASE}/pay/${bill.id}`;
+    const url = `${WEB_URL}/pay/${bill.id}`;
     Share.share({ message: `${bill.emoji_tag} ${bill.title} — bayar lah! ${url}`, url });
   };
 
@@ -146,22 +145,15 @@ export default function BillSummaryScreen() {
     }
   };
 
-  if (!bill) {
-    return (
-      <View style={[styles.container, { backgroundColor: bg }]}>
-        <Text style={{ color: textColor, padding: Spacing.md }}>Loading...</Text>
-      </View>
-    );
-  }
-
   const paidIds = new Set(payments.map((p) => p.participant_id));
-  const collected = payments.reduce((s, p) => s + Number(p.amount), 0);
   const paidCount = paidIds.size;
-  const totalCount = (bill.participants ?? []).length;
+  const totalCount = (bill?.participants ?? []).length;
   const allPaid = totalCount > 0 && paidCount >= totalCount;
-  const shareUrl = `${WEB_BASE}/pay/${bill.id}`;
 
-  // Fire confetti exactly once when bill transitions to 100%
+  // Fire confetti exactly once when the bill transitions to 100%.
+  // Hooks must run on every render, so this sits ABOVE the early return below. (It used
+  // to sit below it: the hook count changed when the bill loaded and React threw
+  // "Rendered more hooks than during the previous render" on this screen.)
   useEffect(() => {
     if (allPaid && !allPaidRef.current) {
       allPaidRef.current = true;
@@ -171,6 +163,17 @@ export default function BillSummaryScreen() {
       allPaidRef.current = false;
     }
   }, [allPaid]);
+
+  if (!bill) {
+    return (
+      <View style={[styles.container, { backgroundColor: bg }]}>
+        <Text style={{ color: textColor, padding: Spacing.md }}>Loading...</Text>
+      </View>
+    );
+  }
+
+  const collected = payments.reduce((s, p) => s + Number(p.amount), 0);
+  const shareUrl = `${WEB_URL}/pay/${bill.id}`;
 
   return (
     <View style={{ flex: 1, backgroundColor: bg }}>

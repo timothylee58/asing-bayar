@@ -1,0 +1,23 @@
+# Explicit rule set: CI must not change behaviour whenever a new ruff release
+# widens its defaults.
+target-version = "py311"
+extend-exclude = ["venv", ".venv"]
+
+[lint]
+select = [
+  "E4", "E7", "E9",  # pycodestyle errors that are real mistakes (not line length)
+  "F",               # pyflakes: unused imports/variables, undefined names
+  "I",               # import ordering
+  "B",               # bugbear: likely bugs
+]
+
+[lint.flake8-bugbear]
+# FastAPI's dependency-injection idiom is `param = Depends(...)` in a default.
+extend-immutable-calls = [
+  "fastapi.Depends", "fastapi.Query", "fastapi.Path", "fastapi.Body",
+  "fastapi.File", "fastapi.Form", "fastapi.Header", "fastapi.Cookie",
+]
+
+[lint.per-file-ignores]
+# conftest must install sys.modules stubs BEFORE importing the app.
+"tests/conftest.py" = ["E402"]

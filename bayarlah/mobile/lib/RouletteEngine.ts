@@ -39,34 +39,47 @@ export function buildSegments(
 }
 
 /**
- * Given an angularVelocity (degrees) from the server and current wheel rotation,
- * compute final resting angle and which segment is under the top pointer.
+ * Work out how far to turn the wheel so the fixed top pointer comes to rest inside the
+ * slice of the winner the SERVER already chose.
  *
- * Pointer is fixed at the top (0°). Wheel rotates clockwise.
- * Segment under pointer = the one whose range contains (360 - finalAngle % 360).
+ * (The client used to derive the winner from the server's angular velocity and then
+ * report it back, so the "server-computed, not manipulable" result was really decided,
+ * and could be edited, on the phone. The wheel is now purely an animation of the
+ * server's decision.)
+ *
+ * Pointer is fixed at the top (0 deg). The wheel rotates clockwise, so for the pointer to
+ * rest at angle P on the wheel the wheel's final rotation is (360 - P) mod 360.
+ *
+ * @param landingFraction where inside the winning slice (0..1) to stop; chosen by the
+ *        server so the stopping point looks natural but can't straddle a boundary.
  */
 export function resolveSpinResult(
   segments: WheelSegment[],
   angularVelocity: number,
-  currentRotationDeg: number = 0,
+  currentRotationDeg: number,
+  winnerParticipantId: string,
+  landingFraction: number,
 ): SpinResult {
-  // Add at least 2 full rotations for visual effect
-  const totalRotation = currentRotationDeg + angularVelocity + 720;
-  const finalAngle = totalRotation % 360;
-  // Pointer is at top = 0°. Wheel has rotated finalAngle clockwise.
-  // The segment at pointer = the segment covering (360 - finalAngle) % 360
-  const pointerAngle = (360 - finalAngle + 360) % 360;
-  const n = segments.length;
-  const anglePer = 360 / n;
-  const winnerIndex = Math.floor(pointerAngle / anglePer) % n;
+  const winnerIndex = segments.findIndex((s) => s.participantId === winnerParticipantId);
+  if (winnerIndex < 0) throw new Error('The winner is not on the wheel');
 
-  // Duration 4–6 seconds based on velocity
-  const durationMs = 4000 + Math.min((angularVelocity - 800) / 400, 1) * 2000;
+  const anglePer = 360 / segments.length;
+  const pointerAngle = (winnerIndex + landingFraction) * anglePer;
+  const finalAngle = (360 - pointerAngle) % 360;
+
+  // Always at least two full turns for show; the server's velocity adds up to two more,
+  // so spins still vary in length.
+  const extraTurns = Math.min(2, Math.max(0, Math.floor((angularVelocity - 800) / 200)));
+  const base = currentRotationDeg + 720 + extraTurns * 360;
+  const delta = (((finalAngle - (base % 360)) % 360) + 360) % 360;
+
+  // Duration 4-6 seconds based on velocity
+  const durationMs = 4000 + Math.min(Math.max((angularVelocity - 800) / 400, 0), 1) * 2000;
 
   return {
     winnerIndex,
-    winnerParticipantId: segments[winnerIndex].participantId,
-    totalRotationDeg: totalRotation,
+    winnerParticipantId,
+    totalRotationDeg: base + delta,
     durationMs,
   };
 }

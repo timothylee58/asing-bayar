@@ -1,14 +1,25 @@
-from pydantic import BaseModel, UUID4
-from decimal import Decimal
 from datetime import datetime
-from typing import Optional
+from decimal import Decimal
+from typing import Literal, Optional
+
+from pydantic import UUID4, BaseModel, Field
+
+PaymentMethod = Literal["duitnow", "tng", "bank", "cash"]
+GatewayMethod = Literal["duitnow", "tng", "bank"]
 
 
 class PaymentConfirm(BaseModel):
+    """Member says "I paid" (honour system, Level 1).
+
+    The amount is always taken from the participant's record on the server. A
+    client may still send it; if it disagrees with what is owed the request is
+    rejected rather than silently trusted.
+    """
+
     participant_id: UUID4
     bill_id: UUID4
-    amount: Decimal
-    method: str  # duitnow | tng | bank | cash
+    method: PaymentMethod
+    amount: Optional[Decimal] = Field(default=None, gt=0, max_digits=10, decimal_places=2)
 
 
 class PaymentResponse(BaseModel):
@@ -27,12 +38,13 @@ class PaymentResponse(BaseModel):
 
 
 class PaymentInitiateRequest(BaseModel):
-    """Request to initiate a gateway-verified payment (Level 2)."""
+    """Request to initiate a gateway-verified payment (Level 2). Cash stays
+    honour-system and is rejected here by the type itself."""
 
     participant_id: UUID4
     bill_id: UUID4
-    amount: Decimal
-    method: str  # duitnow | tng | bank (not cash — cash stays honor-system)
+    method: GatewayMethod
+    amount: Optional[Decimal] = Field(default=None, gt=0, max_digits=10, decimal_places=2)
 
 
 class PaymentInitiateResponse(BaseModel):

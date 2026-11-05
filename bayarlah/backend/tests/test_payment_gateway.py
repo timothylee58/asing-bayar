@@ -12,14 +12,13 @@ import pytest
 os.environ.setdefault("PAYMENT_GATEWAY_ENABLED", "false")
 
 from app.services.payment_gateway import (
+    HITPAY_METHOD_MAP,
     HitPayGateway,
     PaymentGateway,
     PaymentResult,
     StubGateway,
     get_gateway,
-    HITPAY_METHOD_MAP,
 )
-
 
 # ── PaymentResult ────────────────────────────────────────────────────────────
 
@@ -58,7 +57,7 @@ class TestStubGateway:
         assert isinstance(self.gw, PaymentGateway)
 
     def test_create_payment_returns_stub_result(self):
-        result = asyncio.get_event_loop().run_until_complete(
+        result = asyncio.run(
             self.gw.create_payment(
                 amount=Decimal("50.00"),
                 currency="MYR",
@@ -73,7 +72,10 @@ class TestStubGateway:
         assert result.status == "pending"
 
     def test_verify_webhook_always_returns_true(self):
-        assert self.gw.verify_webhook(payload=b"anything", signature="anything") is True
+        assert self.gw.verify_webhook(raw_body=b"anything", headers={}) is True
+
+    def test_is_flagged_as_a_stub_so_production_can_refuse_it(self):
+        assert self.gw.is_stub is True
 
     def test_parse_webhook_returns_verified(self):
         parsed = self.gw.parse_webhook({
@@ -120,20 +122,58 @@ class TestHitPayGateway:
             assert "sandbox" not in gw.base_url
             assert "api.hit-pay.com" in gw.base_url
 
-    def test_verify_webhook_correct_signature(self):
-        payload = b'{"status":"completed","amount":"50.00"}'
-        expected_sig = hmac_mod.new(
-            b"test_webhook_salt", payload, hashlib.sha256
-        ).hexdigest()
-        assert self.gw.verify_webhook(payload=payload, signature=expected_sig) is True
+    def _sig(self, raw: bytes, key: bytes = b"test_webhook_salt") -> str:
+        return hmac_mod.new(key, raw, hashlib.sha256).hexdigest()
+
+    def test_is_not_a_stub(self):
+        assert self.gw.is_stub is False
+
+    def test_verify_webhook_correct_header_signature(self):
+        raw = b'{"status":"completed","amount":"50.00"}'
+        assert self.gw.verify_webhook(raw_body=raw, headers={"hitpay-signature": self._sig(raw)}) is True
+
+    def test_verify_webhook_accepts_the_x_prefixed_header_and_odd_casing(self):
+        raw = b"{}"
+        assert self.gw.verify_webhook(raw_body=raw, headers={"x-hitpay-signature": f" {self._sig(raw).upper()} "}) is True
 
     def test_verify_webhook_wrong_signature(self):
-        payload = b'{"status":"completed","amount":"50.00"}'
-        assert self.gw.verify_webhook(payload=payload, signature="wrong_sig") is False
+        raw = b'{"status":"completed","amount":"50.00"}'
+        assert self.gw.verify_webhook(raw_body=raw, headers={"hitpay-signature": "wrong_sig"}) is False
+
+    def test_verify_webhook_signature_from_another_key_fails(self):
+        raw = b"{}"
+        assert self.gw.verify_webhook(raw_body=raw, headers={"hitpay-signature": self._sig(raw, b"attacker")}) is False
+
+    def test_verify_webhook_signature_does_not_cover_a_different_body(self):
+        assert self.gw.verify_webhook(raw_body=b'{"amount":"1"}',
+                                      headers={"hitpay-signature": self._sig(b'{"amount":"999"}')}) is False
 
     def test_verify_webhook_empty_signature(self):
-        payload = b"test"
-        assert self.gw.verify_webhook(payload=payload, signature="") is False
+        assert self.gw.verify_webhook(raw_body=b"test", headers={"hitpay-signature": ""}) is False
+
+    def test_verify_webhook_no_signature_at_all(self):
+        assert self.gw.verify_webhook(raw_body=b"test", headers={}, fields={"status": "completed"}) is False
+
+    def test_verify_webhook_hmac_field_scheme(self):
+        fields = {"payment_request_id": "p1", "status": "completed", "amount": "50.00"}
+        signed = "".join(f"{k}{fields[k]}" for k in sorted(fields)).encode()
+        assert self.gw.verify_webhook(raw_body=b"", headers={}, fields={**fields, "hmac": self._sig(signed)}) is True
+
+    def test_verify_webhook_hmac_field_covers_every_other_field(self):
+        fields = {"payment_request_id": "p1", "status": "completed", "amount": "50.00"}
+        signed = "".join(f"{k}{fields[k]}" for k in sorted(fields)).encode()
+        forged = {**fields, "amount": "0.01", "hmac": self._sig(signed)}
+        assert self.gw.verify_webhook(raw_body=b"", headers={}, fields=forged) is False
+
+    def test_verify_webhook_without_a_configured_salt_never_verifies(self):
+        with patch("app.services.payment_gateway.settings") as mock_settings:
+            mock_settings.HITPAY_SANDBOX = True
+            mock_settings.HITPAY_API_KEY = "k"
+            mock_settings.HITPAY_WEBHOOK_SALT = ""
+            gw = HitPayGateway()
+        raw = b"{}"
+        empty_key_sig = hmac_mod.new(b"", raw, hashlib.sha256).hexdigest()
+        assert gw.verify_webhook(raw_body=raw, headers={"hitpay-signature": empty_key_sig}) is False
 
     def test_parse_webhook_completed(self):
         body = {
@@ -281,20 +321,21 @@ class TestGetGateway:
             gw = get_gateway()
             assert isinstance(gw, HitPayGateway)
 
-    def test_returns_stub_when_enabled_but_no_key(self):
+    def test_enabled_but_no_key_is_an_error_not_a_silent_stub(self):
+        """The stub accepts unsigned webhooks; falling back to it would be fail-open."""
         with patch("app.services.payment_gateway.settings") as mock_settings:
             mock_settings.PAYMENT_GATEWAY_ENABLED = True
             mock_settings.PAYMENT_GATEWAY_PROVIDER = "hitpay"
             mock_settings.HITPAY_API_KEY = ""
-            gw = get_gateway()
-            assert isinstance(gw, StubGateway)
+            with pytest.raises(RuntimeError):
+                get_gateway()
 
-    def test_returns_stub_for_unknown_provider(self):
+    def test_unknown_provider_is_an_error_not_a_silent_stub(self):
         with patch("app.services.payment_gateway.settings") as mock_settings:
             mock_settings.PAYMENT_GATEWAY_ENABLED = True
             mock_settings.PAYMENT_GATEWAY_PROVIDER = "unknown_provider"
-            gw = get_gateway()
-            assert isinstance(gw, StubGateway)
+            with pytest.raises(RuntimeError):
+                get_gateway()
 
 
 # ── HITPAY_METHOD_MAP ────────────────────────────────────────────────────────

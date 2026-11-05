@@ -1,54 +1,43 @@
 import type { Metadata } from 'next';
 import { notFound } from 'next/navigation';
-import { createClient } from '@supabase/supabase-js';
+import { fetchPublicBill } from '../../../lib/api';
 import PayClientPage from './PayClientPage';
-import type { Bill } from '../../../types';
 
 interface Props {
   params: Promise<{ billId: string }>;
 }
 
-async function fetchBill(billId: string): Promise<Bill | null> {
-  const supabase = createClient(
-    process.env.NEXT_PUBLIC_SUPABASE_URL!,
-    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
-  );
-  const { data } = await supabase
-    .from('bills')
-    .select('*, participants(*, payments(*))')
-    .eq('id', billId)
-    .single();
-  return data ?? null;
-}
+// Never serve a cached bill: payment state changes by the minute.
+export const dynamic = 'force-dynamic';
 
 export async function generateMetadata({ params }: Props): Promise<Metadata> {
   const { billId } = await params;
-  const bill = await fetchBill(billId);
+  const bill = await fetchPublicBill(billId).catch(() => null);
   if (!bill) return { title: 'Bill not found — Bayar.lah' };
 
-  const collected = (bill.payments ?? []).reduce((s: number, p) => s + Number(p.amount), 0);
-  const pct = Math.round((collected / bill.total_amount) * 100);
+  const pct = bill.total_amount > 0 ? Math.round((bill.collected / bill.total_amount) * 100) : 0;
+  const share = bill.per_person != null ? `RM ${bill.per_person.toFixed(2)} per person` : 'See your share';
 
   return {
     title: `${bill.emoji_tag} ${bill.title} — Bayar.lah`,
-    description: `RM ${bill.per_person?.toFixed(2)} per person · ${pct}% collected. Split duit, no awkward lah.`,
+    description: `${share} · ${pct}% collected. Split duit, no awkward lah.`,
     openGraph: {
       title: `${bill.emoji_tag} ${bill.title}`,
-      description: `RM ${bill.per_person?.toFixed(2)} each · Tap to confirm your payment.`,
+      description: `${share} · Tap to confirm your payment.`,
       siteName: 'Bayar.lah',
       type: 'website',
     },
     twitter: {
       card: 'summary',
       title: `${bill.emoji_tag} ${bill.title} — Bayar.lah`,
-      description: `RM ${bill.per_person?.toFixed(2)} per person`,
+      description: share,
     },
   };
 }
 
 export default async function PayPage({ params }: Props) {
   const { billId } = await params;
-  const bill = await fetchBill(billId);
+  const bill = await fetchPublicBill(billId);
   if (!bill) notFound();
   return <PayClientPage bill={bill} />;
 }

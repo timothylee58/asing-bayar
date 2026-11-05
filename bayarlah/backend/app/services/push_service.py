@@ -44,23 +44,3 @@ async def send_expo_push(
                     logger.warning(f"Push failed: {item.get('message')}")
     except Exception as e:
         logger.error(f"Expo push error: {e}")
-
-
-async def get_participant_tokens(
-    supabase,
-    participant_ids: list[str],
-) -> list[str]:
-    """Fetch push tokens for given participants from Supabase."""
-    if not participant_ids:
-        return []
-    try:
-        result = (
-            supabase.table("push_tokens")
-            .select("token")
-            .in_("participant_id", participant_ids)
-            .execute()
-        )
-        return [r["token"] for r in (result.data or [])]
-    except Exception as e:
-        logger.error(f"Failed to fetch push tokens: {e}")
-        return []

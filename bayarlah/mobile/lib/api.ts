@@ -1,24 +1,51 @@
-import Constants from 'expo-constants';
+import { API_URL } from './config';
 import { supabase } from './supabase';
-import type { Bill, Participant, Payment, PaymentDetails } from '../types';
+import type { Bill, PaymentDetails } from '../types';
 
-const API_URL = (Constants.expoConfig?.extra?.apiUrl as string) ?? 'http://localhost:8000';
+export class ApiError extends Error {
+  constructor(
+    message: string,
+    readonly status: number,
+  ) {
+    super(message);
+  }
+}
 
-async function authHeaders(): Promise<Record<string, string>> {
+/** FastAPI errors are `{detail: string}` or, for validation, `{detail: [{msg, loc}]}`. */
+async function errorMessage(res: Response): Promise<string> {
+  const body = await res.json().catch(() => null);
+  const detail = body?.detail;
+  if (typeof detail === 'string') return detail;
+  if (Array.isArray(detail) && detail.length > 0) {
+    const first = detail[0];
+    const field = Array.isArray(first?.loc) ? first.loc.filter((p: unknown) => p !== 'body').join('.') : '';
+    return field ? `${field}: ${first.msg}` : String(first?.msg ?? 'Invalid request');
+  }
+  return res.status === 401 ? 'Please sign in again.' : `Request failed (${res.status})`;
+}
+
+async function authHeaders(json = true): Promise<Record<string, string>> {
   const { data } = await supabase.auth.getSession();
   const token = data.session?.access_token;
-  return token
-    ? { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' }
-    : { 'Content-Type': 'application/json' };
+  return {
+    ...(json ? { 'Content-Type': 'application/json' } : {}),
+    ...(token ? { Authorization: `Bearer ${token}` } : {}),
+  };
 }
 
 async function req<T>(path: string, options?: RequestInit): Promise<T> {
   const res = await fetch(`${API_URL}${path}`, options);
-  if (!res.ok) throw new Error(await res.text());
+  if (!res.ok) throw new ApiError(await errorMessage(res), res.status);
   return res.json();
 }
 
-export async function createBill(payload: {
+async function authed<T>(path: string, init: RequestInit = {}): Promise<T> {
+  return req<T>(path, { ...init, headers: await authHeaders() });
+}
+
+// ── Bills ─────────────────────────────────────────────────────────────────────
+
+export function createBill(payload: {
   title: string;
   total_amount: number;
   description?: string;
@@ -28,40 +55,25 @@ export async function createBill(payload: {
   participants: { name: string; phone?: string }[];
   payment_details?: PaymentDetails;
 }): Promise<Bill> {
-  const headers = await authHeaders();
-  return req('/api/bills', { method: 'POST', headers, body: JSON.stringify(payload) });
+  return authed('/api/bills', { method: 'POST', body: JSON.stringify(payload) });
 }
 
-export async function getBill(billId: string): Promise<Bill> {
-  return req(`/api/bills/${billId}`);
+/** The organiser's full view of one of their bills (the API checks ownership). */
+export function getBill(billId: string): Promise<Bill> {
+  return authed(`/api/bills/${billId}`);
 }
 
-export async function listBills(): Promise<Bill[]> {
-  const headers = await authHeaders();
-  return req('/api/bills', { headers });
+export function listBills(): Promise<Bill[]> {
+  return authed('/api/bills');
 }
 
-export async function confirmPayment(payload: {
-  participant_id: string;
-  bill_id: string;
-  amount: number;
-  method: string;
-}): Promise<Payment> {
-  return req('/api/payments/confirm', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(payload),
-  });
-}
-
-export async function nudgeParticipant(
+export function nudgeParticipant(
   participantId: string,
-): Promise<{ nudged: boolean; whatsapp_link?: string }> {
-  const headers = await authHeaders();
-  return req(`/api/payments/nudge/${participantId}`, { method: 'POST', headers });
+): Promise<{ nudged: boolean; whatsapp_link?: string | null }> {
+  return authed(`/api/payments/nudge/${participantId}`, { method: 'POST' });
 }
 
-// ── Game ──────────────────────────────────────────────────────────────────────
+// ── Game (the server decides every outcome) ───────────────────────────────────
 
 export interface TanggaGenerateResponse {
   seed: string;
@@ -69,72 +81,59 @@ export interface TanggaGenerateResponse {
   n_lanes: number;
 }
 
-export async function generateTangga(payload: {
+export function generateTangga(payload: {
   bill_id: string;
   participant_ids: string[];
   outcome_labels: string[];
 }): Promise<TanggaGenerateResponse> {
-  const headers = await authHeaders();
-  return req('/api/game/tangga/generate', {
-    method: 'POST',
-    headers,
-    body: JSON.stringify(payload),
-  });
+  return authed('/api/game/tangga/generate', { method: 'POST', body: JSON.stringify(payload) });
 }
 
-export async function lockTangga(payload: {
+export interface GameResultRow {
+  id: string;
+  result_json: Record<string, string>;
+}
+
+/** Players pick lanes; the server derives who gets which outcome from its own ladder. */
+export function lockTangga(payload: {
   bill_id: string;
-  result: Record<string, string>;
-}): Promise<void> {
-  const headers = await authHeaders();
-  return req('/api/game/tangga/lock', {
-    method: 'POST',
-    headers,
-    body: JSON.stringify(payload),
-  });
+  lanes: Record<string, number>; // participant id -> lane
+}): Promise<GameResultRow> {
+  return authed('/api/game/tangga/lock', { method: 'POST', body: JSON.stringify(payload) });
 }
 
 export interface RouletteSpinResponse {
   seed: string;
   angular_velocity: number;
+  /** Chosen by the server when the spin starts; the wheel animates to land on it. */
+  winner_participant_id: string;
+  /** Where inside the winning slice (0..1) the pointer should come to rest. */
+  landing_fraction: number;
 }
 
-export async function spinRoulette(payload: {
+export function spinRoulette(payload: {
   bill_id: string;
   participant_ids: string[];
-  include_belanja_segment: boolean;
 }): Promise<RouletteSpinResponse> {
-  const headers = await authHeaders();
-  return req('/api/game/roulette/spin', {
-    method: 'POST',
-    headers,
-    body: JSON.stringify(payload),
-  });
+  return authed('/api/game/roulette/spin', { method: 'POST', body: JSON.stringify(payload) });
 }
 
-export async function lockRoulette(payload: {
+export function lockRoulette(payload: {
   bill_id: string;
   winner_participant_id: string;
   outcome: string;
-}): Promise<void> {
-  const headers = await authHeaders();
-  return req('/api/game/roulette/lock', {
-    method: 'POST',
-    headers,
-    body: JSON.stringify(payload),
-  });
+}): Promise<GameResultRow> {
+  return authed('/api/game/roulette/lock', { method: 'POST', body: JSON.stringify(payload) });
 }
 
-
-// ── Payment QR Upload ─────────────────────────────────────────────────────────
+// ── Payment QR upload ─────────────────────────────────────────────────────────
 
 export async function uploadPaymentQR(
   billId: string,
   imageUri: string,
 ): Promise<{ duitnow_qr_url: string }> {
-  const headers = await authHeaders();
-  // Remove Content-Type so fetch sets multipart/form-data with boundary
-  delete headers['Content-Type'];
+  // No Content-Type: fetch must set multipart/form-data with its own boundary.
+  const headers = await authHeaders(false);
 
   const formData = new FormData();
   const filename = imageUri.split('/').pop() ?? 'qr.png';
@@ -145,13 +144,23 @@ export async function uploadPaymentQR(
     uri: imageUri,
     name: filename,
     type: mimeType,
-  } as any);
+  } as unknown as Blob);
 
   const res = await fetch(`${API_URL}/api/bills/${billId}/payment-qr`, {
     method: 'POST',
     headers,
     body: formData,
   });
-  if (!res.ok) throw new Error(await res.text());
+  if (!res.ok) throw new ApiError(await errorMessage(res), res.status);
   return res.json();
+}
+
+// ── Push notifications (organiser device) ─────────────────────────────────────
+
+export function registerPushToken(token: string): Promise<{ registered: boolean }> {
+  return authed('/api/notifications/register', { method: 'POST', body: JSON.stringify({ token }) });
+}
+
+export function unregisterPushToken(): Promise<{ unregistered: boolean }> {
+  return authed('/api/notifications/unregister', { method: 'DELETE' });
 }

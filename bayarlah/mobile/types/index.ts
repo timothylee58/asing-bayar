@@ -45,7 +45,9 @@ export interface Bill {
   created_at: string;
   share_url?: string;
   participants?: Participant[];
+  /** Settled payments only (confirmed or gateway-verified), flat. */
   payments?: Payment[];
+  collected?: number;
   payment_details?: PaymentDetails | null;
 }
 

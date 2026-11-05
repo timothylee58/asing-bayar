@@ -1,8 +1,7 @@
 """Tests for pure game logic — no Supabase/Redis required."""
 import string
 
-from app.utils.game_logic import make_seed, generate_tangga_rungs, traverse_tangga
-
+from app.utils.game_logic import generate_tangga_rungs, make_seed, traverse_tangga
 
 # ---------------------------------------------------------------------------
 # make_seed

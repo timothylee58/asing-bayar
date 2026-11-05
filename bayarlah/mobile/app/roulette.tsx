@@ -167,7 +167,9 @@ export default function RouletteScreen() {
       bill_id: billId,
       winner_participant_id: seg.participantId,
       outcome: LOSER_LABEL,
-    }).catch(() => {});
+    }).catch((e: unknown) => {
+      Alert.alert('Result not saved', e instanceof Error ? e.message : 'Could not save the result.');
+    });
   }, [segments, billId]);
 
   const handleSpin = useCallback(async () => {
@@ -177,10 +179,15 @@ export default function RouletteScreen() {
       const res = await spinRoulette({
         bill_id: billId,
         participant_ids: participantIds,
-        include_belanja_segment: true,
       });
 
-      const result = resolveSpinResult(segments, res.angular_velocity, rotation.value);
+      const result = resolveSpinResult(
+        segments,
+        res.angular_velocity,
+        rotation.value,
+        res.winner_participant_id,
+        res.landing_fraction,
+      );
       setPhase('spinning');
 
       Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
