@@ -34,7 +34,9 @@ jobs:
       - name: Setup EAS
         uses: expo/expo-github-action@v8
         with:
-          eas-version: latest
+          # Pinned: `latest` drifted to a release needing Node 22 and broke this step once.
+          # Bump deliberately (and check its Node requirement vs. setup-node above).
+          eas-version: 27.4.1
           token: ${{ secrets.EXPO_TOKEN }}
 
       - name: Build Android (preview)
